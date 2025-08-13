@@ -1047,3 +1047,32 @@ body { display: flex; justify-content: center; align-items: flex-start; min-heig
   .search-bar { width: 100% !important; }
   .search-bar input { width: calc(100% - 110px) !important; }
 }
+
+/* Enhanced skeleton loading */
+.skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 12px;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+@media (min-width: 1200px) {
+    .skeleton-grid {
+        grid-template-columns: repeat(3, 360px);
+    }
+}
+
+.skeleton-card {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius);
+    background: linear-gradient(90deg, #101014 0%, #1e1e24 50%, #101014 100%);
+    background-size: 200% 100%;
+    animation: skeletonShimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes skeletonShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: 0 0; }
+}
