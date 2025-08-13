@@ -152,20 +152,11 @@ export function filterAndScoreResults(results, maxResults = 20) {
             // Must have image URL
             if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
             
-            // ULTRA HI-RES REQUIREMENT: Must be at least 2MP (minimum acceptable)
-            const w = Number(result.width || 0);
-            const h = Number(result.height || 0);
-            const megaPixels = (w * h) / 1_000_000;
-            
-            if (megaPixels >= 2) return true; // 2MP minimum
-            
-            // If no dimensions available, allow it (will be sorted low)
-            if (w === 0 || h === 0) return true;
-            
-            return false; // Under 2MP = reject
+            // Allow all images through filtering - HI-RES scoring handles prioritization
+            return true;
         });
         
-        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results meet minimum 2MP requirement`);
+        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results passed filtering (all valid images allowed)`);
         
         // Sort by COMBINED collaboration + hi-res score
         hiResResults.sort((a, b) => {
@@ -208,17 +199,8 @@ export function filterAndScoreResults(results, maxResults = 20) {
             return false;
         }
         
-        // ULTRA HI-RES REQUIREMENT: Must be at least 2MP
-        const w = Number(result.width || 0);
-        const h = Number(result.height || 0);
-        const megaPixels = (w * h) / 1_000_000;
-        
-        if (megaPixels >= 2) return true; // 2MP minimum
-        
-        // If no dimensions available, allow it (will be sorted low)
-        if (w === 0 || h === 0) return true;
-        
-        return false; // Under 2MP = reject
+        // Allow all images through filtering - HI-RES scoring handles prioritization
+        return true;
     });
     
     console.log(`[BTrust] After HI-RES filtering: ${filteredResults.length} results`);
