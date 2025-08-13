@@ -36,7 +36,6 @@ async function processOGQueue() {
         } catch (e) {
             reject(e);
         }
-        // Reduced wait time for faster processing
         await new Promise(r => setTimeout(r, 50));
     }
     ogProcessing = false;
@@ -49,62 +48,56 @@ function queueOGRequest(result) {
     });
 }
 
-// RELAXED Image quality validation - Accept most images
+// ULTRA-RELAXED Image quality validation - Accept almost everything
 async function validateImageQuality(result) {
     try {
         const imageUrl = result.imageUrl || result.url;
         if (!imageUrl) return false;
         
-        // Quick format check first
-        if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+        // Quick format check - accept more formats
+        if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif|gif|bmp)(\?|#|$)/i)) {
             return false;
         }
         
-        // If we have ANY metadata suggesting decent size, accept it
+        // If we have ANY size metadata, trust it
         const w = Number(result.width || 0);
         const h = Number(result.height || 0);
         const bytes = Number(result.byteSize || 0);
         
-        // VERY RELAXED STANDARDS - prioritize getting results
+        // EXTREMELY PERMISSIVE STANDARDS
         if (w && h) {
-            const pixels = w * h;
-            const is600px = w >= 600 || h >= 600;   // Very low threshold
-            const is300k = pixels >= 300_000;       // 0.3MP minimum
-            
-            if (is300k || is600px) {
-                console.log(`[BSearch] HIRES via metadata: ${w}x${h} (${Math.round(pixels/1000000)}MP)`);
+            // Accept anything 400px+ on ANY side
+            if (w >= 400 || h >= 400) {
+                console.log(`[BSearch] ACCEPTED via metadata: ${w}x${h}`);
                 return true;
             }
         }
         
-        // Accept even 30KB+ files
-        if (bytes >= 30_000) {
-            console.log(`[BSearch] HIRES via filesize: ${Math.round(bytes/1000)}KB`);
+        // Accept tiny files even (10KB+)
+        if (bytes >= 10_000) {
+            console.log(`[BSearch] ACCEPTED via filesize: ${Math.round(bytes/1000)}KB`);
             return true;
         }
         
-        // SKIP HEAD CHECKS - they're causing too many failures
-        // Just trust that if it made it this far, it's probably good
-        console.log(`[BSearch] Accepting image without HEAD check: ${imageUrl}`);
+        // NO HEAD CHECKS - just accept everything that looks like an image
+        console.log(`[BSearch] ACCEPTING image (no validation): ${imageUrl}`);
         return true;
         
     } catch (e) {
-        console.warn(`[BSearch] Quality check failed for ${result.imageUrl || result.url}:`, e.message);
-        // Always assume good if validation fails
+        // Always accept if validation fails
         return true;
     }
 }
 
-function relevanceFirstFilter(results, maxResults = 200) {
+function relevanceFirstFilter(results, maxResults = 50) { // ← INCREASED FROM 25 TO 50
     if (!results || results.length === 0) {
         return [];
     }
 
-    console.log(`[BSearch] Processing ${results.length} raw results with RELEVANCE PRIORITY`);
+    console.log(`[BSearch] Processing ${results.length} raw results with RELEVANCE PRIORITY (TOP ${maxResults})`);
     
     // Only filter out exact URL duplicates
     const uniqueResults = results.filter(result => {
-        // Must have a URL
         if (!result.url && !result.imageUrl) return false;
         
         const key = (result.imageUrl || result.url).toLowerCase().trim();
@@ -117,31 +110,51 @@ function relevanceFirstFilter(results, maxResults = 200) {
     
     console.log(`[BSearch] After deduplication: ${uniqueResults.length} results`);
     
-    // RELEVANCE-FIRST SCORING - Resolution is secondary
+    // SMART RELEVANCE SCORING - Detect query type
     const scoredResults = uniqueResults.map(result => {
         let score = 0;
         
-        // MASSIVE RELEVANCE BOOSTS (10x more important than resolution)
         const query = (result._query || '').toLowerCase();
         const entities = query.split(/\s+(?:and|&|vs|x|with|,|\+)\s+/g).map(s => s.trim()).filter(Boolean);
         
+        // DETECT IF THIS IS A PEOPLE/ARTISTS QUERY
+        const isPeopleQuery = entities.length >= 2 && entities.every(entity => {
+            const words = entity.split(/\s+/);
+            const hasCapitalizedWords = words.some(w => /^[A-Z][a-z]+$/.test(w));
+            const isShortName = words.length <= 3;
+            const hasCommonNamePattern = /^[a-z]+\s+[a-z]+$/i.test(entity) || /^[a-z]+$/i.test(entity);
+            return hasCapitalizedWords || (isShortName && hasCommonNamePattern);
+        });
+        
         if (entities.length > 1) {
-            // Check all available text fields for entity mentions
             const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
             
             const entityMatches = entities.filter(e => hay.includes(e)).length;
             
-            // HUGE boost for images that mention ALL entities (true collaboration)
-            if (entityMatches === entities.length) {
-                score += 100; // MASSIVE boost for true co-occurrence
-                console.log(`[BSearch] PERFECT RELEVANCE: "${result.title}" mentions all entities: ${entities.join(', ')}`);
-            }
-            // Good boost for partial matches
-            else if (entityMatches >= 2) {
-                score += 50; // Strong boost for 2+ entities
-            }
-            else if (entityMatches === 1) {
-                score += 20; // Moderate boost for 1 entity
+            if (isPeopleQuery) {
+                // PEOPLE/ARTISTS: High score for ANY entity match (OR logic)
+                if (entityMatches >= 1) {
+                    score += 80; // High score for featuring any artist
+                    console.log(`[BSearch] ARTIST MATCH: "${result.title}" mentions ${entityMatches}/${entities.length} artists`);
+                }
+                
+                // MEGA BONUS for rare collaborations (both artists together)
+                if (entityMatches === entities.length) {
+                    score += 50; // Extra bonus for collaboration
+                    console.log(`[BSearch] RARE COLLABORATION: "${result.title}" mentions ALL artists: ${entities.join(', ')}`);
+                }
+            } else {
+                // NON-PEOPLE: Keep original AND logic (require all terms)
+                if (entityMatches === entities.length) {
+                    score += 100; // MASSIVE boost for true co-occurrence
+                    console.log(`[BSearch] PERFECT RELEVANCE: "${result.title}" mentions all entities: ${entities.join(', ')}`);
+                }
+                else if (entityMatches >= 2) {
+                    score += 50; // Strong boost for 2+ entities
+                }
+                else if (entityMatches === 1) {
+                    score += 20; // Moderate boost for 1 entity
+                }
             }
             
             // Extra boost for collaboration keywords
@@ -151,10 +164,9 @@ function relevanceFirstFilter(results, maxResults = 200) {
                 score += collabMatches * 10;
             }
         } else {
-            // Single entity queries - check for strong matches
+            // Single entity queries
             const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
             
-            // Count how many times the query appears
             const queryMatches = (hay.match(new RegExp(query, 'gi')) || []).length;
             if (queryMatches >= 2) {
                 score += 30; // Multiple mentions
@@ -190,14 +202,14 @@ function relevanceFirstFilter(results, maxResults = 200) {
         return { ...result, _score: score };
     });
     
-    // Sort by score (highest first) - relevance wins over resolution
+    // Sort by score (highest first)
     scoredResults.sort((a, b) => (b._score || 0) - (a._score || 0));
     
-    const final = scoredResults.slice(0, maxResults);
-    console.log(`[BSearch] Final results: ${final.length} (max: ${maxResults})`);
+    const final = scoredResults.slice(0, maxResults); // TOP 50
+    console.log(`[BSearch] Final results: ${final.length} (TOP ${maxResults})`);
     
-    // Log top scoring results for debugging
-    final.slice(0, 5).forEach((result, i) => {
+    // Log top scoring results
+    final.slice(0, 10).forEach((result, i) => {
         const w = result.width || 0;
         const h = result.height || 0;
         const mp = Math.round((w * h) / 1000000);
@@ -247,10 +259,10 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                 }
             }
             
-            // Get images from news articles too - multiple time ranges
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 7));   // Last week
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));  // Last month
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 90));  // Last 3 months
+            // Get images from news articles too
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 7));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 90));
             promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7));
             promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30));
             promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 90));
@@ -269,7 +281,6 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
 
     console.log(`[BSearch] Making ${promises.length} API calls for ${category}`);
     
-    // Wait for all promises but don't fail on individual errors
     const results = await Promise.allSettled(promises);
     
     const validResults = results
@@ -281,7 +292,6 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
 }
 
 export async function performSearch(query, categories, settings, offset = 0, options = {}) {
-    // Reset caches for new searches
     if (offset === 0) {
         resetDuplicateCache();
         resetSeenResults();
@@ -296,16 +306,14 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             
             const rawResults = await searchCategory(category, query, apiKeys, searchConfig, offset, options);
             
-            // Add metadata to each result
             const resultsWithMeta = rawResults.map(result => ({ 
                 ...result, 
                 category, 
                 _query: query 
             }));
             
-            // For images, extract URLs and do RELAXED quality validation
             if (category === 'images') {
-                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with RELEVANCE PRIORITY...`);
+                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with RELEVANCE PRIORITY (TOP 50)...`);
                 
                 // Extract direct image URLs (rate limited)
                 const needsOG = resultsWithMeta
@@ -339,14 +347,13 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                     }
                 }
                 
-                // RELAXED QUALITY VALIDATION - Much more permissive
-                console.log(`[BSearch] Validating image quality with RELAXED standards for ${resultsWithMeta.length} results...`);
+                // ULTRA-RELAXED QUALITY VALIDATION
+                console.log(`[BSearch] Validating image quality with ULTRA-RELAXED standards for ${resultsWithMeta.length} results...`);
                 const qualityPromises = resultsWithMeta.map(async (result) => {
                     const isAcceptable = await validateImageQuality(result);
                     return isAcceptable ? result : null;
                 });
                 
-                // Process in smaller batches for speed
                 const qualityResults = [];
                 const batchSize = 20;
                 for (let i = 0; i < qualityPromises.length; i += batchSize) {
@@ -354,22 +361,20 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                     const batchResults = await Promise.all(batch);
                     qualityResults.push(...batchResults.filter(Boolean));
                     
-                    // Very small delay between batches
                     if (i + batchSize < qualityPromises.length) {
                         await new Promise(r => setTimeout(r, 50));
                     }
                 }
                 
-                console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed (RELAXED STANDARDS)`);
+                console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed (ULTRA-RELAXED)`);
                 
-                // Use RELEVANCE-FIRST filtering
-                allResults[category] = relevanceFirstFilter(qualityResults, 200);
+                // Use RELEVANCE-FIRST filtering with TOP 50 limit
+                allResults[category] = relevanceFirstFilter(qualityResults, 50);
             } else {
-                // Non-images don't need quality validation
-                allResults[category] = relevanceFirstFilter(resultsWithMeta, 200);
+                allResults[category] = relevanceFirstFilter(resultsWithMeta, 50);
             }
             
-            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results (RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results (TOP 50 RELEVANCE PRIORITIZED)`);
             
         } catch (error) {
             console.error(`[BSearch] ${category} search failed:`, error);
@@ -394,7 +399,6 @@ export async function loadMoreResults(query, category, settings, offset, options
             _query: query 
         }));
         
-        // Quality validation for load more too
         if (category === 'images') {
             const qualityPromises = resultsWithMeta.map(async (result) => {
                 if (!result.imageUrl) result.imageUrl = result.url;
@@ -406,11 +410,11 @@ export async function loadMoreResults(query, category, settings, offset, options
             
             const qualityResults = (await Promise.all(qualityPromises)).filter(Boolean);
             const filtered = relevanceFirstFilter(qualityResults, 50);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results (RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results (TOP 50 RELEVANCE PRIORITIZED)`);
             return filtered;
         } else {
             const filtered = relevanceFirstFilter(resultsWithMeta, 50);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} results (RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} results (TOP 50 RELEVANCE PRIORITIZED)`);
             return filtered;
         }
         
