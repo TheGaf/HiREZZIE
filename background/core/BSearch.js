@@ -3,11 +3,13 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { filterAndScoreResults, resetDuplicateCache } from './BTrust.js';
 
 let seenImages = new Set();
 
 function resetCache() {
     seenImages.clear();
+    resetDuplicateCache();
 }
 
 function isValidImage(result) {
@@ -91,6 +93,8 @@ async function searchImages(query, apiKeys, offset = 0) {
         
         if (isValidImage(image)) {
             seenImages.add(imageUrl);
+            // Add the query to each result for context analysis
+            image._query = query;
             validImages.push(image);
         }
     }
@@ -116,7 +120,13 @@ async function searchImages(query, apiKeys, offset = 0) {
         return bQuality - aQuality;
     });
     
-    return validImages;
+    // Apply BTrust filtering and scoring for celebrity disambiguation
+    const trustedImages = filterAndScoreResults(validImages.map(img => ({
+        ...img,
+        category: 'images'
+    })), 50); // Allow more results initially, BTrust will filter to final count
+    
+    return trustedImages;
 }
 
 export async function performSearch(query, categories, settings, offset = 0) {
