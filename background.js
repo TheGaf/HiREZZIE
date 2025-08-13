@@ -1,7 +1,21 @@
-// Import config
-importScripts('config.js');
-
 // Simple background service worker for hiREZZIE
+
+// API Configuration (replace with your actual keys)
+const API_CONFIG = {
+  google: {
+    apiKey: 'YOUR_GOOGLEIMAGES_KEY_HERE',  // Replace with actual key
+    searchEngineId: 'YOUR_GOOGLE_SEARCH_KEY_HERE'  // Replace with actual search engine ID
+  },
+  brave: {
+    apiKey: 'YOUR_BRAVE_KEY_HERE'  // Replace with actual key
+  },
+  serpapi: {
+    apiKey: 'YOUR_SERPAPI_KEY_HERE'  // Replace with actual key
+  },
+  newsapi: {
+    apiKey: 'YOUR_GNEWS_KEY_HERE'  // Replace with actual key
+  }
+};
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'searchImages') {
@@ -116,7 +130,7 @@ async function searchSerpApiImages(query) {
   try {
     const apiKey = API_CONFIG.serpapi.apiKey;
     
-    if (!apiKey || apiKey === 'SERPAPI_KEY') {
+    if (!apiKey || apiKey.startsWith('YOUR_')) {
       console.log('SerpApi key not configured');
       return [];
     }
@@ -149,7 +163,7 @@ async function searchBraveImages(query) {
   try {
     const apiKey = API_CONFIG.brave.apiKey;
     
-    if (!apiKey || apiKey === 'BRAVE_KEY') {
+    if (!apiKey || apiKey.startsWith('YOUR_')) {
       console.log('Brave API key not configured');
       return [];
     }
@@ -190,7 +204,7 @@ async function searchGoogleImages(query) {
     const apiKey = API_CONFIG.google.apiKey;
     const searchEngineId = API_CONFIG.google.searchEngineId;
     
-    if (!apiKey || apiKey === 'GOOGLEIMAGES_KEY') {
+    if (!apiKey || apiKey.startsWith('YOUR_')) {
       console.log('Google API key not configured');
       return [];
     }
