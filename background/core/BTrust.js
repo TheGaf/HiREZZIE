@@ -1,41 +1,5 @@
 // background/core/BTrust.js
 
-// Sources to completely filter out - STREAMLINED LIST
-const BLOCKED_SOURCES = [
-    // Social Media (low quality, watermarked, or hard to access)
-    'twitter.com', 'x.com', 'twimg.com', 't.co',
-    
-    // Wikipedia (low res, generic images)
-    'wikipedia.org', 'wikimedia.org', 'wikiquote.org', 'fandom.com', 'wikia.com',
-    
-    // Shopping/E-commerce Sites
-    'amazon.com', 'ebay.com', 'etsy.com', 'walmart.com', 'target.com', 'bestbuy.com',
-    'shopify.com', 'lazada.com', 'shopee', 'aliexpress.com', 'alibaba.com',
-    'mercari', 'poshmark.com', 'merchbar.com', 'weverse.io',
-    
-    // Print-on-Demand & Merch Sites
-    'redbubble.com', 'teepublic.com', 'zazzle.com', 'cafepress.com',
-    
-    // Stock Photo Houses (watermarked, paid content)
-    'shutterstock.com', 'gettyimages.com', 'istockphoto.com', 'adobe.com'
-];
-
-function isBlockedSource(sourceName, url) {
-    if (!sourceName && !url) return false;
-    
-    const sourceLower = sourceName ? sourceName.toLowerCase() : '';
-    const urlLower = url ? url.toLowerCase() : '';
-    let host = '';
-    try { host = new URL(url || '').hostname.toLowerCase(); } catch {}
-    
-    // Block obvious shopping subdomains
-    const subdomainBlocked = host.startsWith('store.') || host.startsWith('shop.') || host.startsWith('merch.');
-    
-    return subdomainBlocked || BLOCKED_SOURCES.some(blocked => 
-        sourceLower.includes(blocked) || urlLower.includes(blocked) || host.includes(blocked)
-    );
-}
-
 function isEnglishContent(title, snippet) {
     const nonEnglishRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF\uFB1D-\uFB4F]/;
     return !nonEnglishRegex.test(title + ' ' + (snippet || ''));
@@ -84,16 +48,50 @@ function dedupeImagesBySignature(results) {
     return Array.from(signatureToBest.values());
 }
 
-// Enhanced collaboration scoring function with RELAXED thresholds
+// ULTRA HIGH-RES scoring - prioritize massive images
+function getHiResScore(result) {
+    const w = Number(result.width || 0);
+    const h = Number(result.height || 0);
+    const pixelCount = w * h;
+    const megaPixels = pixelCount / 1_000_000;
+    
+    let score = 0;
+    
+    // ULTRA HIGH-RES SCORING (much more aggressive)
+    if (megaPixels >= 50) score += 1000;      // 50MP+ = ULTRA premium
+    else if (megaPixels >= 24) score += 500;  // 24MP+ = Professional camera quality
+    else if (megaPixels >= 16) score += 300;  // 16MP+ = High-end phone/camera
+    else if (megaPixels >= 12) score += 200;  // 12MP+ = Modern phone quality
+    else if (megaPixels >= 8) score += 100;   // 8MP+ = Decent quality
+    else if (megaPixels >= 4) score += 50;    // 4MP+ = Minimum acceptable
+    else if (megaPixels >= 2) score += 10;    // 2MP+ = Low quality
+    // Under 2MP gets 0 points
+    
+    // Bonus for specific high-res dimensions
+    if (w >= 8000 || h >= 8000) score += 200; // 8K resolution
+    if (w >= 6000 || h >= 6000) score += 150; // 6K resolution  
+    if (w >= 4000 || h >= 4000) score += 100; // 4K resolution
+    if (w >= 3000 || h >= 3000) score += 50;  // 3K resolution
+    
+    // Aspect ratio bonus (prefer standard ratios)
+    if (w > 0 && h > 0) {
+        const ratio = w / h;
+        if (ratio >= 0.5 && ratio <= 2.0) score += 25; // Reasonable aspect ratio
+    }
+    
+    return score;
+}
+
+// Enhanced collaboration scoring function
 function scoreCollaborationResult(result, entities) {
     const haystack = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
     
     let score = 0;
     const entityMatches = entities.filter(e => haystack.includes(e.toLowerCase())).length;
     
-    // PRIORITY: Both entities mentioned = huge boost
+    // Both entities mentioned = huge boost
     if (entityMatches >= 2) {
-        score += 100; // Massive boost for both entities
+        score += 100;
         
         // Extra boost for collaboration keywords
         if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
@@ -110,19 +108,17 @@ function scoreCollaborationResult(result, entities) {
             score += 30;
         }
     } else if (entityMatches === 1) {
-        // RELAXED: Single entity gets decent score for collaboration searches
-        score += 25; // Increased from 5 to 25
+        // Single entity gets decent score
+        score += 25;
         
         // Boost single entity with collaboration context
         if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
-            score += 20; // Increased from 10 to 20
+            score += 20;
         }
     }
     
-    // Size/quality boost
-    const pixelCount = (Number(result.width || 0) * Number(result.height || 0));
-    if (pixelCount >= 8_000_000) score += 10;
-    else if (pixelCount >= 4_000_000) score += 5;
+    // ADD HI-RES SCORE to collaboration score
+    score += getHiResScore(result);
     
     return score;
 }
@@ -132,7 +128,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return [];
     }
 
-    console.log(`[BTrust] Processing ${results.length} results for curation`);
+    console.log(`[BTrust] Processing ${results.length} results for ULTRA HI-RES curation`);
     
     // Check if this is a collaboration search
     const collaboration = results[0]?._collaboration;
@@ -141,95 +137,91 @@ export function filterAndScoreResults(results, maxResults = 20) {
     if (isCollaborationSearch) {
         console.log(`[BTrust] COLLABORATION SEARCH detected for entities:`, collaboration.entities);
         
-        // STEP 1: Score all results for collaboration relevance
+        // Score all results for collaboration relevance + HI-RES
         const scoredResults = results.map(result => ({
             ...result,
-            _collaborationScore: scoreCollaborationResult(result, collaboration.entities)
+            _collaborationScore: scoreCollaborationResult(result, collaboration.entities),
+            _hiResScore: getHiResScore(result)
         }));
         
-        // STEP 2: RELAXED filtering for collaborations
-        const collaborationResults = scoredResults.filter(result => {
-            // Block bad sources
-            if (isBlockedSource(result.source, result.url)) return false;
-            
+        // ULTRA HI-RES filtering - only accept high resolution images
+        const hiResResults = scoredResults.filter(result => {
             // English content only
             if (!isEnglishContent(result.title, result.snippet)) return false;
             
             // Must have image URL
             if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
             
-            // RELAXED COLLABORATION FILTER: Much lower threshold
-            return result._collaborationScore >= 15; // Reduced from 50 to 15
-        });
-        
-        console.log(`[BTrust] Collaboration filtering: ${collaborationResults.length} results with score >= 15`);
-        
-        // STEP 3: If still too few, try very low threshold
-        let finalResults = collaborationResults;
-        if (finalResults.length < 5) {
-            console.log(`[BTrust] Too few results, trying very low threshold (score >= 5)`);
-            finalResults = scoredResults.filter(result => {
-                if (isBlockedSource(result.source, result.url)) return false;
-                if (!isEnglishContent(result.title, result.snippet)) return false;
-                if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
-                return result._collaborationScore >= 5;
-            });
-        }
-        
-        // STEP 4: Emergency fallback - show any valid images
-        if (finalResults.length < 3) {
-            console.log(`[BTrust] Emergency fallback - showing all valid images`);
-            finalResults = scoredResults.filter(result => {
-                if (isBlockedSource(result.source, result.url)) return false;
-                if (!isEnglishContent(result.title, result.snippet)) return false;
-                if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
-                return true; // Accept any valid image
-            });
-        }
-        
-        // STEP 5: Sort by collaboration score + pixel count
-        finalResults.sort((a, b) => {
-            const scoreDiff = (b._collaborationScore || 0) - (a._collaborationScore || 0);
-            if (scoreDiff !== 0) return scoreDiff;
+            // ULTRA HI-RES REQUIREMENT: Must be at least 2MP (minimum acceptable)
+            const w = Number(result.width || 0);
+            const h = Number(result.height || 0);
+            const megaPixels = (w * h) / 1_000_000;
             
-            const pa = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-            const pb = (Number(b.width || 0) * Number(b.height || 0)) || 0;
-            return pb - pa;
+            if (megaPixels >= 2) return true; // 2MP minimum
+            
+            // If no dimensions available, allow it (will be sorted low)
+            if (w === 0 || h === 0) return true;
+            
+            return false; // Under 2MP = reject
         });
         
-        console.log(`[BTrust] Final collaboration results: ${finalResults.length}, top scores:`, 
-            finalResults.slice(0, 5).map(r => ({ 
+        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results meet minimum 2MP requirement`);
+        
+        // Sort by COMBINED collaboration + hi-res score
+        hiResResults.sort((a, b) => {
+            const totalScoreA = (a._collaborationScore || 0) + (a._hiResScore || 0);
+            const totalScoreB = (b._collaborationScore || 0) + (b._hiResScore || 0);
+            return totalScoreB - totalScoreA;
+        });
+        
+        console.log(`[BTrust] Final HI-RES collaboration results: ${hiResResults.length}, top scores:`, 
+            hiResResults.slice(0, 5).map(r => ({ 
                 title: r.title?.substring(0, 50), 
-                score: r._collaborationScore 
+                collabScore: r._collaborationScore,
+                hiResScore: r._hiResScore,
+                megaPixels: ((Number(r.width || 0) * Number(r.height || 0)) / 1_000_000).toFixed(1),
+                source: r.source
             }))
         );
         
         // Remove duplicates
-        const uniqueResults = dedupeImagesBySignature(finalResults);
+        const uniqueResults = dedupeImagesBySignature(hiResResults);
         
         return uniqueResults.slice(0, maxResults).map(result => ({
             ...result,
             curated: true,
-            curationMessage: `Collaboration search: ${collaboration.entities.join(' + ')}`
+            curationMessage: `HI-RES collaboration: ${collaboration.entities.join(' + ')}`
         }));
     }
     
-    // REGULAR (NON-COLLABORATION) SEARCH LOGIC
+    // REGULAR (NON-COLLABORATION) ULTRA HI-RES SEARCH
     const filteredResults = results.filter(result => {
-        const blocked = isBlockedSource(result.source, result.url);
         const english = isEnglishContent(result.title, result.snippet);
-
-        if (blocked) {
-            console.log(`[BTrust] Filtered out blocked source: "${result.source}" (${result.url})`);
-        }
+        
         if (!english) {
             console.log(`[BTrust] Filtered out non-English content: "${result.title}"`);
+            return false;
         }
         
-        return !blocked && english && (result.imageUrl || /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || ''));
+        // Must have image URL
+        if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) {
+            return false;
+        }
+        
+        // ULTRA HI-RES REQUIREMENT: Must be at least 2MP
+        const w = Number(result.width || 0);
+        const h = Number(result.height || 0);
+        const megaPixels = (w * h) / 1_000_000;
+        
+        if (megaPixels >= 2) return true; // 2MP minimum
+        
+        // If no dimensions available, allow it (will be sorted low)
+        if (w === 0 || h === 0) return true;
+        
+        return false; // Under 2MP = reject
     });
     
-    console.log(`[BTrust] After filtering blocked sources: ${filteredResults.length} results`);
+    console.log(`[BTrust] After HI-RES filtering: ${filteredResults.length} results`);
     
     let uniqueResults;
     if (filteredResults.length > 0 && filteredResults[0].category === 'images') {
@@ -252,33 +244,36 @@ export function filterAndScoreResults(results, maxResults = 20) {
         });
     }
     
-    // Regular scoring and sorting
-    const withHiResBoost = uniqueResults.map(result => {
-        let scoreBoost = 0;
-        if (result.category === 'images') {
-            const w = Number(result.width || 0);
-            const h = Number(result.height || 0);
-            const pixelCount = w * h;
-            if (pixelCount >= 8_000_000) scoreBoost += 2;
-            else if (pixelCount >= 4_000_000) scoreBoost += 1;
-        }
+    // ULTRA HI-RES SCORING AND SORTING
+    const withUltraHiResBoost = uniqueResults.map(result => {
+        const hiResScore = getHiResScore(result);
+        const w = Number(result.width || 0);
+        const h = Number(result.height || 0);
+        const megaPixels = ((w * h) / 1_000_000).toFixed(1);
+        
         return { 
             ...result, 
             curated: true,
-            curationMessage: "I personally curated this from the best sources available",
-            _hiresBoost: scoreBoost
+            curationMessage: `ULTRA HI-RES: ${megaPixels}MP (${w}×${h})`,
+            _hiResScore: hiResScore
         };
     });
 
-    withHiResBoost.sort((a, b) => {
-        const boostDiff = (b._hiresBoost || 0) - (a._hiresBoost || 0);
-        if (boostDiff !== 0) return boostDiff;
-        const pa = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-        const pb = (Number(b.width || 0) * Number(b.height || 0)) || 0;
-        return pb - pa;
+    // Sort by HI-RES score (highest resolution first)
+    withUltraHiResBoost.sort((a, b) => {
+        return (b._hiResScore || 0) - (a._hiResScore || 0);
     });
 
-    return withHiResBoost.slice(0, maxResults);
+    console.log(`[BTrust] Top HI-RES results:`, 
+        withUltraHiResBoost.slice(0, 5).map(r => ({
+            megaPixels: ((Number(r.width || 0) * Number(r.height || 0)) / 1_000_000).toFixed(1),
+            dimensions: `${r.width}×${r.height}`,
+            score: r._hiResScore,
+            source: r.source
+        }))
+    );
+
+    return withUltraHiResBoost.slice(0, maxResults);
 }
 
 export function resetDuplicateCache() {
