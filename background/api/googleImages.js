@@ -11,12 +11,12 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
     return [];
   }
 
-  const quote = (s) => `"${s}"`;
-  const blacklist = options.blacklist || [];
-  const q = quote(String(query || '').trim()) + (blacklist.length ? ' ' + blacklist.map(d => `-site:${d}`).join(' ') : '');
+  // Use exact query with quotes for phrase matching 
+  const quotedQuery = `"${query.trim()}"`;
+  
   const start = Math.max(1, (offset % 90) + 1); // API allows start up to 91 for num=10
   const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}`
-    + `&q=${encodeURIComponent(q)}`
+    + `&q=${encodeURIComponent(quotedQuery)}`
     + `&searchType=image&num=10&start=${start}`
     + `&imgSize=xxlarge&imgType=photo&safe=off`;
 
@@ -50,31 +50,27 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
         publishedAt: new Date().toISOString()
       }));
 
-    // Pre-filter by Google-reported dimensions/bytes when present
+    // Basic size filter: Keep images ≥400px on any side OR ≥50KB filesize
     items = items.filter(it => {
-      const bigEnough = (it.width && it.width >= 2000) || (it.height && it.height >= 2000);
-      const fatEnough = it.byteSize && it.byteSize >= 1_500_000;
-      return bigEnough || fatEnough;
+      const bigEnough = (it.width && it.width >= 400) || (it.height && it.height >= 400);
+      const fatEnough = it.byteSize && it.byteSize >= 50_000;
+      return bigEnough || fatEnough || (!it.width && !it.height && !it.byteSize); // Accept if no size info
     });
 
-    // Dedupe by host+path+size (keep first; later we keep largest after merging sources)
+    // Simple dedup by URL
     const seen = new Set();
     items = items.filter(it => {
-      try {
-        const u = new URL(it.imageUrl);
-        const key = `${u.hostname}${u.pathname}|${it.width || 0}x${it.height || 0}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      } catch { return true; }
+      const key = it.imageUrl.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
-    // Sort by area then byte size
+    // Sort by pixel count (larger images first)
     items.sort((a, b) => {
       const aa = (a.width || 0) * (a.height || 0);
       const bb = (b.width || 0) * (b.height || 0);
-      if (bb !== aa) return bb - aa;
-      return (b.byteSize || 0) - (a.byteSize || 0);
+      return bb - aa;
     });
 
     return items;

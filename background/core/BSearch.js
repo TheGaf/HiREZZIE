@@ -1,15 +1,7 @@
 // background/core/BSearch.js
 import { resetDuplicateCache } from './BTrust.js';
-import { fetchOpenGraphData, headCheck } from '../utils/BUtils.js';
-import { searchGNews } from '../api/gnews.js';
-import { searchNewsAPIOrg } from '../api/news.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchGoogleImages } from '../api/googleImages.js';
-import { searchYouTube } from '../api/youtube.js';
-import { searchVimeo } from '../api/vimeo.js';
-import { searchDailymotion } from '../api/dailymotion.js';
-import { searchBrave } from '../api/brave.js';
-import { searchBraveImages } from '../api/brave.js';
 import { searchBingImages } from '../api/bing.js';
 
 // Global cache to prevent exact duplicates
@@ -20,116 +12,36 @@ function resetSeenResults() {
     console.log('[BSearch] Reset seen results cache');
 }
 
-// Rate limiting for OG requests
-const ogRequestQueue = [];
-let ogProcessing = false;
-
-async function processOGQueue() {
-    if (ogProcessing || ogRequestQueue.length === 0) return;
-    ogProcessing = true;
+// Simple image quality validation - basic size/filesize check
+function validateImageQuality(result) {
+    const imageUrl = result.imageUrl || result.url;
+    if (!imageUrl) return false;
     
-    while (ogRequestQueue.length > 0) {
-        const { result, resolve, reject } = ogRequestQueue.shift();
-        try {
-            const og = await fetchOpenGraphData(result.url);
-            resolve(og);
-        } catch (e) {
-            reject(e);
-        }
-        await new Promise(r => setTimeout(r, 50));
+    // Accept images with basic file extensions
+    if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif|gif|bmp)(\?|#|$)/i)) {
+        return false;
     }
-    ogProcessing = false;
-}
-
-function queueOGRequest(result) {
-    return new Promise((resolve, reject) => {
-        ogRequestQueue.push({ result, resolve, reject });
-        processOGQueue();
-    });
-}
-
-// ULTRA-RELAXED Image quality validation - Accept almost everything
-async function validateImageQuality(result) {
-    try {
-        const imageUrl = result.imageUrl || result.url;
-        if (!imageUrl) return false;
-        
-        // Quick format check - accept more formats
-        if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif|gif|bmp)(\?|#|$)/i)) {
-            return false;
-        }
-        
-        // If we have ANY size metadata, trust it
-        const w = Number(result.width || 0);
-        const h = Number(result.height || 0);
-        const bytes = Number(result.byteSize || 0);
-        
-        // EXTREMELY PERMISSIVE STANDARDS
-        if (w && h) {
-            // Accept anything 400px+ on ANY side
-            if (w >= 400 || h >= 400) {
-                console.log(`[BSearch] ACCEPTED via metadata: ${w}x${h}`);
-                return true;
-            }
-        }
-        
-        // Accept tiny files even (10KB+)
-        if (bytes >= 10_000) {
-            console.log(`[BSearch] ACCEPTED via filesize: ${Math.round(bytes/1000)}KB`);
-            return true;
-        }
-        
-        // NO HEAD CHECKS - just accept everything that looks like an image
-        console.log(`[BSearch] ACCEPTING image (no validation): ${imageUrl}`);
-        return true;
-        
-    } catch (e) {
-        // Always accept if validation fails
+    
+    // Basic size check: >= 400px on any side OR >= 50KB filesize
+    const w = Number(result.width || 0);
+    const h = Number(result.height || 0);
+    const bytes = Number(result.byteSize || 0);
+    
+    if ((w >= 400 || h >= 400) || bytes >= 50_000) {
         return true;
     }
+    
+    // Accept if no size info available (trust the API)
+    return true;
 }
 
-// Debug function to analyze term distribution
-function analyzeTermDistribution(results, query) {
-    const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const termStats = {};
-    
-    // Initialize stats
-    searchTerms.forEach(term => {
-        termStats[term] = { count: 0, sources: new Set() };
-    });
-    
-    results.forEach(result => {
-        const haystack = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
-        
-        searchTerms.forEach(term => {
-            if (haystack.includes(term)) {
-                termStats[term].count++;
-                termStats[term].sources.add(result._source || 'unknown');
-            }
-        });
-    });
-    
-    console.log(`[BSearch] TERM DISTRIBUTION ANALYSIS for "${query}":`);
-    searchTerms.forEach(term => {
-        const stats = termStats[term];
-        console.log(`  "${term}": ${stats.count} results from [${Array.from(stats.sources).join(', ')}]`);
-    });
-    
-    return termStats;
-}
-
-function relevanceFirstFilter(results, maxResults = 50, query = '') {
+// Simple filtering - just remove exact URL duplicates and return in source order
+function simpleFilter(results, maxResults = 50) {
     if (!results || results.length === 0) {
         return [];
     }
 
-    console.log(`[BSearch] Processing ${results.length} raw results with BALANCED OR LOGIC`);
-    
-    // Analyze term distribution BEFORE filtering
-    if (query) {
-        analyzeTermDistribution(results, query);
-    }
+    console.log(`[BSearch] Processing ${results.length} raw results with simple filtering`);
     
     // Only filter out exact URL duplicates
     const uniqueResults = results.filter(result => {
@@ -145,219 +57,41 @@ function relevanceFirstFilter(results, maxResults = 50, query = '') {
     
     console.log(`[BSearch] After deduplication: ${uniqueResults.length} results`);
     
-    // BALANCED OR LOGIC - Ensure fair representation of all terms
-    const queryLower = query.toLowerCase(); // ← FIXED: Added missing variable declaration
-    const scoredResults = uniqueResults.map(result => {
-        let score = 0;
-        
-        const searchTerms = queryLower.split(/\s+/).filter(Boolean);
-        
-        // Check all available text fields for ANY search term (OR logic)
-        const haystack = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
-        
-        // Count matches for each search term
-        let termMatches = 0;
-        let totalMatches = 0;
-        const matchedTerms = [];
-        
-        for (const term of searchTerms) {
-            const matches = (haystack.match(new RegExp(term, 'gi')) || []).length;
-            if (matches > 0) {
-                termMatches++;
-                totalMatches += matches;
-                matchedTerms.push(term);
-            }
-        }
-        
-        // BALANCED SCORING - Favor variety across all terms
-        if (termMatches > 0) {
-            // Base score for having ANY search term
-            score += 50;
-            
-            // Bonus for multiple term matches
-            score += (termMatches - 1) * 20;
-            
-            // Bonus for multiple occurrences
-            score += Math.min(totalMatches * 5, 25);
-            
-            // Extra bonus for title matches
-            const titleMatches = searchTerms.filter(term => 
-                (result.title || '').toLowerCase().includes(term)
-            ).length;
-            
-            if (titleMatches > 0) {
-                score += titleMatches * 15;
-            }
-        }
-        
-        // Small resolution boosts (much smaller than relevance)
-        if (result.category === 'images') {
-            const w = Number(result.width || 0);
-            const h = Number(result.height || 0);
-            const pixelCount = w * h;
-            const bytes = Number(result.byteSize || 0);
-            
-            // Tiny boosts for verified high-res (secondary to relevance)
-            if (pixelCount >= 8_000_000) score += 3;      // 8MP+ 
-            else if (pixelCount >= 4_000_000) score += 2; // 4MP+
-            else if (pixelCount >= 2_000_000) score += 1; // 2MP+
-            
-            if (bytes >= 3_000_000) score += 2;           // 3MB+
-            else if (bytes >= 1_000_000) score += 1;      // 1MB+
-        }
-        
-        return { ...result, _score: score, _matchedTerms: matchedTerms };
-    });
-    
-    // BALANCED SELECTION: Ensure fair representation of all search terms
-    const searchTerms = queryLower.split(/\s+/).filter(Boolean);
-    if (searchTerms.length > 1) {
-        // Group results by which terms they match
-        const termGroups = {};
-        searchTerms.forEach(term => {
-            termGroups[term] = scoredResults.filter(r => 
-                r._matchedTerms && r._matchedTerms.includes(term)
-            ).sort((a, b) => (b._score || 0) - (a._score || 0));
-        });
-        
-        // Take top results from each term group to ensure balance
-        const balancedResults = [];
-        const resultsPerTerm = Math.ceil(maxResults / searchTerms.length);
-        
-        searchTerms.forEach(term => {
-            const termResults = termGroups[term] || [];
-            console.log(`[BSearch] Term "${term}": ${termResults.length} matching results`);
-            
-            // Add top results for this term
-            const termTop = termResults.slice(0, resultsPerTerm);
-            termTop.forEach(result => {
-                if (!balancedResults.find(r => r.url === result.url)) {
-                    balancedResults.push(result);
-                }
-            });
-        });
-        
-        // Fill remaining slots with highest scoring overall results
-        const remaining = maxResults - balancedResults.length;
-        if (remaining > 0) {
-            const allSorted = scoredResults
-                .filter(r => !balancedResults.find(b => b.url === r.url))
-                .sort((a, b) => (b._score || 0) - (a._score || 0));
-            
-            balancedResults.push(...allSorted.slice(0, remaining));
-        }
-        
-        const final = balancedResults.slice(0, maxResults);
-        console.log(`[BSearch] BALANCED results: ${final.length} (ensuring fair term representation)`);
-        
-        // Log final distribution
-        const finalStats = {};
-        searchTerms.forEach(term => {
-            finalStats[term] = final.filter(r => 
-                r._matchedTerms && r._matchedTerms.includes(term)
-            ).length;
-        });
-        
-        console.log(`[BSearch] FINAL DISTRIBUTION:`, finalStats);
-        return final;
-        
-    } else {
-        // Single term - use regular sorting
-        scoredResults.sort((a, b) => (b._score || 0) - (a._score || 0));
-        const final = scoredResults.slice(0, maxResults);
-        console.log(`[BSearch] Single term results: ${final.length}`);
-        return final;
-    }
+    // Return results in source order, no complex scoring
+    const final = uniqueResults.slice(0, maxResults);
+    console.log(`[BSearch] Simple filter results: ${final.length}`);
+    return final;
 }
 
 async function searchCategory(category, query, apiKeys, searchConfig, offset = 0, options = {}) {
     console.log(`[BSearch] Searching category: ${category} for query: "${query}" with offset: ${offset}`);
     let promises = [];
     
-    switch (category) {
-        case 'articles':
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 7).then(results => 
-                results.map(r => ({ ...r, _source: 'GNews' }))
-            ));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7).then(results => 
-                results.map(r => ({ ...r, _source: 'NewsAPI' }))
-            ));
-            promises.push(searchBrave(query, apiKeys.brave, offset).then(results => 
-                results.map(r => ({ ...r, _source: 'Brave' }))
-            ));
-            break;
-            
-        case 'images':
-            // Free sources first - with source tagging
-            promises.push(searchBraveImages(query, apiKeys.brave, offset).then(results => 
-                results.map(r => ({ ...r, _source: 'BraveImages' }))
-            ));
-            
-            // MASSIVE Bing coverage - up to 800 results
-            const bingOffsets = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750];
-            for (const off of bingOffsets) {
-                promises.push(searchBingImages(query, off, options).then(results => 
-                    results.map(r => ({ ...r, _source: `Bing-${off}` }))
+    if (category === 'images') {
+        // Fast results pipeline - up to 100 results each
+        
+        // Primary: Google Custom Search Images API
+        if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
+            for (let i = 0; i < 10; i++) { // 10 pages of 10 = 100 results max
+                promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, i * 10, options).then(results => 
+                    results.map(r => ({ ...r, _source: 'GoogleCSE' }))
                 ));
             }
-            
-            // Google CSE if available - multiple pages
-            if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
-                const googleOffsets = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
-                for (const off of googleOffsets) {
-                    promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, off, options).then(results => 
-                        results.map(r => ({ ...r, _source: `GoogleCSE-${off}` }))
-                    ));
-                }
-            }
-            
-            // SerpApi if available - multiple offsets
-            if (apiKeys?.serpApi) {
-                const serpOffsets = [0, 100, 200, 300, 400];
-                for (const off of serpOffsets) {
-                    promises.push(searchSerpApiImages(query, apiKeys.serpApi, off, options).then(results => 
-                        results.map(r => ({ ...r, _source: `SerpApi-${off}` }))
-                    ).catch(e => {
-                        console.warn(`[BSearch] SerpApi failed at offset ${off}:`, e.message);
-                        return [];
-                    }));
-                }
-            }
-            
-            // Get images from news articles too
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 7).then(results => 
-                results.map(r => ({ ...r, _source: 'GNews-7d' }))
+        }
+        
+        // Secondary: SerpApi Google Images
+        if (apiKeys?.serpApi) {
+            promises.push(searchSerpApiImages(query, apiKeys.serpApi, 0, options).then(results => 
+                results.map(r => ({ ...r, _source: 'SerpApi' }))
             ));
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 30).then(results => 
-                results.map(r => ({ ...r, _source: 'GNews-30d' }))
+        }
+        
+        // Fallback: Bing Images HTML scraping
+        for (let i = 0; i < 2; i++) { // 2 pages = 100 results max
+            promises.push(searchBingImages(query, i * 50, options).then(results => 
+                results.map(r => ({ ...r, _source: 'Bing' }))
             ));
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 90).then(results => 
-                results.map(r => ({ ...r, _source: 'GNews-90d' }))
-            ));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7).then(results => 
-                results.map(r => ({ ...r, _source: 'NewsAPI-7d' }))
-            ));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30).then(results => 
-                results.map(r => ({ ...r, _source: 'NewsAPI-30d' }))
-            ));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 90).then(results => 
-                results.map(r => ({ ...r, _source: 'NewsAPI-90d' }))
-            ));
-            
-            // Multiple Brave offsets
-            const braveOffsets = [0, 10, 20, 30, 40];
-            for (const off of braveOffsets) {
-                promises.push(searchBraveImages(query, apiKeys.brave, off).then(results => 
-                    results.map(r => ({ ...r, _source: `BraveImages-${off}` }))
-                ));
-            }
-            break;
-            
-        case 'videos':
-            promises.push(searchYouTube(query, apiKeys.youtube, offset).then(results => 
-                results.map(r => ({ ...r, _source: 'YouTube' }))
-            ));
-            break;
+        }
     }
 
     console.log(`[BSearch] Making ${promises.length} API calls for ${category}`);
@@ -369,15 +103,6 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
         .flatMap(res => res.value);
     
     console.log(`[BSearch] Got ${validResults.length} raw results for ${category}`);
-    
-    // SOURCE DISTRIBUTION ANALYSIS
-    const sourceStats = {};
-    validResults.forEach(result => {
-        const source = result._source || 'unknown';
-        sourceStats[source] = (sourceStats[source] || 0) + 1;
-    });
-    
-    console.log(`[BSearch] SOURCE DISTRIBUTION:`, sourceStats);
     
     return validResults;
 }
@@ -404,29 +129,7 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             }));
             
             if (category === 'images') {
-                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with BALANCED OR LOGIC...`);
-                
-                // Extract direct image URLs (rate limited)
-                const needsOG = resultsWithMeta
-                    .filter(result => !result.imageUrl?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i))
-                    .slice(0, 20);
-                
-                for (const result of needsOG) {
-                    try {
-                        const og = await queueOGRequest(result);
-                        if (og?.image) {
-                            result.imageUrl = og.image;
-                            result.thumbnail = og.image;
-                            result.ogTitle = og.title;
-                            result.ogDescription = og.description;
-                            result.ogAlt = og.alt;
-                        }
-                    } catch (e) {
-                        if (result.url?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
-                            result.imageUrl = result.url;
-                        }
-                    }
-                }
+                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with simple filtering...`);
                 
                 // Ensure all results have imageUrl
                 for (const result of resultsWithMeta) {
@@ -438,34 +141,18 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                     }
                 }
                 
-                // ULTRA-RELAXED QUALITY VALIDATION
-                console.log(`[BSearch] Validating image quality with ULTRA-RELAXED standards for ${resultsWithMeta.length} results...`);
-                const qualityPromises = resultsWithMeta.map(async (result) => {
-                    const isAcceptable = await validateImageQuality(result);
-                    return isAcceptable ? result : null;
-                });
+                // Basic size filter: Keep images ≥400px on any side OR ≥50KB filesize
+                const qualityResults = resultsWithMeta.filter(result => validateImageQuality(result));
                 
-                const qualityResults = [];
-                const batchSize = 20;
-                for (let i = 0; i < qualityPromises.length; i += batchSize) {
-                    const batch = qualityPromises.slice(i, i + batchSize);
-                    const batchResults = await Promise.all(batch);
-                    qualityResults.push(...batchResults.filter(Boolean));
-                    
-                    if (i + batchSize < qualityPromises.length) {
-                        await new Promise(r => setTimeout(r, 50));
-                    }
-                }
+                console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed`);
                 
-                console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed (ULTRA-RELAXED)`);
-                
-                // Use BALANCED OR LOGIC filtering with TOP 50 limit
-                allResults[category] = relevanceFirstFilter(qualityResults, 50, query);
+                // Simple filtering - return top 50 in source order
+                allResults[category] = simpleFilter(qualityResults, 50);
             } else {
-                allResults[category] = relevanceFirstFilter(resultsWithMeta, 50, query);
+                allResults[category] = simpleFilter(resultsWithMeta, 50);
             }
             
-            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results (BALANCED OR LOGIC)`);
+            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results`);
             
         } catch (error) {
             console.error(`[BSearch] ${category} search failed:`, error);
@@ -491,21 +178,19 @@ export async function loadMoreResults(query, category, settings, offset, options
         }));
         
         if (category === 'images') {
-            const qualityPromises = resultsWithMeta.map(async (result) => {
+            // Ensure all results have imageUrl
+            for (const result of resultsWithMeta) {
                 if (!result.imageUrl) result.imageUrl = result.url;
                 if (!result.thumbnail) result.thumbnail = result.imageUrl || result.url;
-                
-                const isAcceptable = await validateImageQuality(result);
-                return isAcceptable ? result : null;
-            });
+            }
             
-            const qualityResults = (await Promise.all(qualityPromises)).filter(Boolean);
-            const filtered = relevanceFirstFilter(qualityResults, 50, query);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results (BALANCED OR LOGIC)`);
+            const qualityResults = resultsWithMeta.filter(result => validateImageQuality(result));
+            const filtered = simpleFilter(qualityResults, 50);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results`);
             return filtered;
         } else {
-            const filtered = relevanceFirstFilter(resultsWithMeta, 50, query);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} results (BALANCED OR LOGIC)`);
+            const filtered = simpleFilter(resultsWithMeta, 50);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} results`);
             return filtered;
         }
         

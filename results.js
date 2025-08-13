@@ -1,4 +1,3 @@
-let searchTimer;
 let currentQuery = '';
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -6,7 +5,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const searchBtn = document.getElementById('searchBtn');
   const imageGrid = document.getElementById('imageGrid');
   const loadingDiv = document.querySelector('.loading');
-  const timerSpan = document.getElementById('timer');
 
   // Get query from URL
   const urlParams = new URLSearchParams(window.location.search);
@@ -17,37 +15,13 @@ document.addEventListener('DOMContentLoaded', function() {
     performSearch(query);
   }
 
-  function startTimer() {
-    const startTime = Date.now();
-    searchTimer = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      timerSpan.textContent = `${elapsed.toFixed(1)}s`;
-    }, 100);
-  }
-
-  function stopTimer() {
-    if (searchTimer) {
-      clearInterval(searchTimer);
-      searchTimer = null;
-    }
-  }
-
   function showLoading() {
     loadingDiv.style.display = 'flex';
     imageGrid.innerHTML = '';
-    startTimer();
   }
 
   function hideLoading() {
     loadingDiv.style.display = 'none';
-    stopTimer();
-  }
-
-  function createSkeletonGrid() {
-    const skeletonHTML = Array(9).fill(0).map(() => 
-      '<div class="skeleton-card"></div>'
-    ).join('');
-    imageGrid.innerHTML = skeletonHTML;
   }
 
   function displayImages(images) {
@@ -63,23 +37,17 @@ document.addEventListener('DOMContentLoaded', function() {
       imageCard.className = 'image-card';
       
       const imageLink = document.createElement('a');
-      // FIX: Use imageUrl for direct image link, fallback to url
+      // Use imageUrl for direct image link, fallback to url
       imageLink.href = image.imageUrl || image.url;
       imageLink.target = '_blank';
       imageLink.className = 'image-link';
       imageLink.rel = 'noopener noreferrer';
       
       const img = document.createElement('img');
-      img.className = 'image-thumb loading';
+      img.className = 'image-thumb';
       img.alt = image.title || 'High resolution image';
       img.loading = 'lazy';
       img.referrerPolicy = 'no-referrer';
-      
-      // Handle image load
-      img.onload = () => {
-        img.classList.remove('loading');
-        img.classList.add('loaded');
-      };
       
       img.onerror = () => {
         imageCard.style.display = 'none';
@@ -91,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
       imageLink.appendChild(img);
       imageCard.appendChild(imageLink);
       
-      // Add credit if available
+      // Add clean credit with just source name
       if (image.source) {
         const credit = document.createElement('div');
         credit.className = 'image-credit';
@@ -110,7 +78,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     currentQuery = query.trim();
     showLoading();
-    createSkeletonGrid();
     
     try {
       // Send message to background script
