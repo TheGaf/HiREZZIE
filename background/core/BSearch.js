@@ -17,7 +17,7 @@ function detectCollaborationIntent(query) {
     const normalized = query.toLowerCase().trim();
     
     // Split on collaboration keywords and common separators
-    const collaborationPattern = /\s+(?:and|&|vs|x|with|feat\.?|featuring|,|\+|×)+\s+/i;
+    const collaborationPattern = /\s+(?:and|&|vs|x|with|feat\.?|featuring|,|\+|×|alongside|meets|duet|duo|pair|together)+\s+/i;
     const entities = normalized.split(collaborationPattern).map(s => s.trim()).filter(Boolean);
     
     // Also check for simple space-separated artist names (common pattern)
@@ -32,9 +32,17 @@ function detectCollaborationIntent(query) {
     const capitalizedWords = query.split(/\s+/).filter(word => 
         word.length > 2 && word[0] === word[0].toUpperCase()
     );
+    
+    // More aggressive detection for two separate names
     const likelyMultipleArtists = capitalizedWords.length >= 2 && hasMultipleWords;
     
-    const isCollaboration = hasMultipleEntities || hasCollaborationKeywords || likelyMultipleArtists;
+    // Additional heuristics for collaboration detection
+    const hasCommonCollaborationContext = /\b(duet|duo|pair|together|meets|alongside|collaboration|collab|ft|feat)\b/i.test(query);
+    const hasTwoDistinctNames = hasMultipleWords && spaceEntities.length === 2 && 
+        spaceEntities.every(word => word[0] === word[0].toUpperCase());
+    
+    const isCollaboration = hasMultipleEntities || hasCollaborationKeywords || 
+                           likelyMultipleArtists || hasCommonCollaborationContext || hasTwoDistinctNames;
     
     // Use the most specific entity split available
     let finalEntities;
@@ -42,6 +50,8 @@ function detectCollaborationIntent(query) {
         finalEntities = entities;
     } else if (likelyMultipleArtists && capitalizedWords.length === 2) {
         finalEntities = capitalizedWords;
+    } else if (hasTwoDistinctNames) {
+        finalEntities = spaceEntities;
     } else {
         finalEntities = [normalized];
     }
@@ -52,14 +62,16 @@ function detectCollaborationIntent(query) {
         entities: finalEntities,
         hasMultipleEntities,
         hasCollaborationKeywords,
-        likelyMultipleArtists
+        likelyMultipleArtists,
+        hasCommonCollaborationContext,
+        hasTwoDistinctNames
     });
     
     return {
         isCollaboration,
         entities: finalEntities,
         originalQuery: query,
-        hasExplicitCollaborationWords: hasCollaborationKeywords
+        hasExplicitCollaborationWords: hasCollaborationKeywords || hasCommonCollaborationContext
     };
 }
 
@@ -101,11 +113,16 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                     `${entity1} ${entity2} together`, // Together keyword
                     `${entity1} ${entity2} collaboration`, // Collaboration keyword
                     `${entity1} ${entity2} photo`, // Photo keyword
+                    `${entity1} ${entity2} picture`, // Picture keyword
+                    `${entity1} ${entity2} duo`, // Duo keyword
+                    `${entity1} ${entity2} pair`, // Pair keyword
+                    `${entity1} ${entity2} meeting`, // Meeting keyword
+                    `${entity1} ${entity2} event`, // Event keyword
                     collaboration.hasExplicitCollaborationWords ? query : `${entity1} and ${entity2}`, // Enhanced original
                     query // Original as final fallback
                 ];
                 
-                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 4));
+                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 6));
             }
             
             // Use the most specific query for API calls

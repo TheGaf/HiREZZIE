@@ -1,6 +1,7 @@
 const DEFAULTS = {
   apiKey: '',
   cx: '',
+  braveApiKey: '', // Added Brave API key
   imgSize: 'xxlarge',
   minWidth: 2000,
   minHeight: 2000,
@@ -16,6 +17,7 @@ function getEls() {
   return {
     apiKey: document.getElementById('apiKey'),
     cx: document.getElementById('cx'),
+    braveApiKey: document.getElementById('braveApiKey'), // Added Brave API key element
     imgSize: document.getElementById('imgSize'),
     minWidth: document.getElementById('minWidth'),
     minHeight: document.getElementById('minHeight'),
@@ -49,6 +51,7 @@ async function load() {
   const cfg = Object.assign({}, DEFAULTS, stored);
   els.apiKey.value = cfg.apiKey;
   els.cx.value = cfg.cx;
+  els.braveApiKey.value = cfg.braveApiKey; // Load Brave API key
   els.imgSize.value = cfg.imgSize;
   els.minWidth.value = cfg.minWidth;
   els.minHeight.value = cfg.minHeight;
@@ -68,6 +71,7 @@ async function load() {
     const saveCfg = {
       apiKey: els.apiKey.value.trim(),
       cx: els.cx.value.trim(),
+      braveApiKey: els.braveApiKey.value.trim(), // Save Brave API key
       imgSize: els.imgSize.value,
       minWidth: Number(els.minWidth.value),
       minHeight: Number(els.minHeight.value),
@@ -75,12 +79,35 @@ async function load() {
       exactDefault: els.exactDefault.checked,
       blacklist: Array.from(els.blacklist.querySelectorAll('.pill span:first-child')).map(s => s.textContent)
     };
+    
+    // Save in sync storage (for backward compatibility)
     await chrome.storage.sync.set(saveCfg);
+    
+    // Also save in the new nested structure expected by BSettings.js
+    const nestedSettings = {
+      apiKeys: {
+        brave: saveCfg.braveApiKey,
+        googleImages: {
+          apiKey: saveCfg.apiKey,
+          cx: saveCfg.cx
+        }
+      },
+      searchConfig: {
+        usePaidImageAPIs: true,
+        preferGoogleCSE: false,
+        requireAllTerms: false,
+        minImageMegaPixels: 2
+      }
+    };
+    await chrome.storage.local.set(nestedSettings);
+    
     alert('Saved');
   });
 
   els.reset.addEventListener('click', async () => {
     await chrome.storage.sync.set(DEFAULTS);
+    // Also clear the nested structure
+    await chrome.storage.local.clear();
     location.reload();
   });
 }

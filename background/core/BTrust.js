@@ -271,21 +271,55 @@ export function filterAndScoreResults(results, maxResults = 20) {
             if (pixelCount >= 8_000_000) scoreBoost += 2;
             else if (pixelCount >= 4_000_000) scoreBoost += 1;
 
-            // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
+            // Enhanced co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
             const query = (result._query || '').toLowerCase();
-            const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
-            const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
-            if (entities.length > 1) {
-                const all = entities.every(e => hay.includes(e));
-                const any = entities.some(e => hay.includes(e));
-                if (all) scoreBoost += 4; // strong co-occurrence
-                else if (any) scoreBoost += 1; // keep as padding if needed
+            const collaboration = result._collaboration;
+            
+            if (collaboration && collaboration.isCollaboration && collaboration.entities.length >= 2) {
+                // More comprehensive metadata search for collaboration context
+                const metadataText = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.snippet || ''} ${result.pageUrl || ''} ${result.source || ''}`.toLowerCase();
+                
+                const entities = collaboration.entities.map(e => e.toLowerCase().trim());
+                const entitiesFound = entities.filter(entity => metadataText.includes(entity));
+                
+                // Check for collaboration keywords in metadata
+                const collaborationKeywords = ['together', 'and', 'with', 'meets', 'collaboration', 'collab', 'duo', 'pair', 'duet', 'featuring', 'feat', 'alongside'];
+                const hasCollabKeywords = collaborationKeywords.some(keyword => metadataText.includes(keyword));
+                
+                // Filename analysis for collaboration detection
+                const filename = (result.imageUrl || result.url || '').toLowerCase();
+                const filenameHasMultipleEntities = entities.filter(entity => filename.includes(entity.replace(/\s+/g, ''))).length >= 2;
+                
+                // Aggressive scoring for collaboration context
+                if (entitiesFound.length === entities.length && hasCollabKeywords) {
+                    scoreBoost += 8; // All entities + collaboration keywords = highest priority
+                } else if (entitiesFound.length === entities.length) {
+                    scoreBoost += 6; // All entities mentioned
+                } else if (entitiesFound.length >= Math.ceil(entities.length / 2) && hasCollabKeywords) {
+                    scoreBoost += 4; // Some entities + collaboration context
+                } else if (filenameHasMultipleEntities) {
+                    scoreBoost += 5; // Filename suggests collaboration
+                } else if (entitiesFound.length > 0) {
+                    scoreBoost += Math.min(entitiesFound.length, 3); // Partial entity matches
+                }
+                
+                console.log(`[BTrust] Collaboration scoring for "${result.title}": entities found: ${entitiesFound.length}/${entities.length}, collab keywords: ${hasCollabKeywords}, filename entities: ${filenameHasMultipleEntities}, boost: ${scoreBoost}`);
             } else {
-                // Fallback: token coverage when no clear entities
-                const tokens = query.split(/\s+/).filter(Boolean);
-                const matches = tokens.filter(t => hay.includes(t)).length;
-                if (matches >= Math.min(3, tokens.length)) scoreBoost += 2;
-                else if (matches >= 2) scoreBoost += 1;
+                // Fallback for non-collaboration queries
+                const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
+                const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
+                if (entities.length > 1) {
+                    const all = entities.every(e => hay.includes(e));
+                    const any = entities.some(e => hay.includes(e));
+                    if (all) scoreBoost += 4; // strong co-occurrence
+                    else if (any) scoreBoost += 1; // keep as padding if needed
+                } else {
+                    // Token coverage when no clear entities
+                    const tokens = query.split(/\s+/).filter(Boolean);
+                    const matches = tokens.filter(t => hay.includes(t)).length;
+                    if (matches >= Math.min(3, tokens.length)) scoreBoost += 2;
+                    else if (matches >= 2) scoreBoost += 1;
+                }
             }
         }
         const curatedResult = { 

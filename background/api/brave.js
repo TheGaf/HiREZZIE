@@ -14,8 +14,14 @@ export async function searchBrave(query, apiKey, offset = 0) {
     return [];
   }
 
-  // Clean up the query for better API compatibility
-  const cleanQuery = query.replace(/[^\w\s]/g, ' ').trim();
+  // More selective query cleaning - preserve quotes and operators for collaboration searches
+  let cleanQuery = query.trim();
+  
+  // Only clean if query doesn't contain quotes (indicating intentional search operators)
+  if (!/"[^"]*"/.test(cleanQuery)) {
+    // Remove problematic characters but preserve basic search operators
+    cleanQuery = cleanQuery.replace(/[^\w\s"&+()-]/g, ' ').trim();
+  }
   
   // If query is too short or empty, return empty results
   if (!cleanQuery || cleanQuery.length < 2) {
@@ -66,8 +72,14 @@ export async function searchBraveImages(query, apiKey, offset = 0) {
     return [];
   }
 
-  // Clean up the query for better API compatibility
-  const cleanQuery = query.replace(/[^\w\s]/g, ' ').trim();
+  // More selective query cleaning - preserve quotes and operators for collaboration searches
+  let cleanQuery = query.trim();
+  
+  // Only clean if query doesn't contain quotes (indicating intentional search operators)
+  if (!/"[^"]*"/.test(cleanQuery)) {
+    // Remove problematic characters but preserve basic search operators
+    cleanQuery = cleanQuery.replace(/[^\w\s"&+()-]/g, ' ').trim();
+  }
   
   // If query is too short or empty, return empty results
   if (!cleanQuery || cleanQuery.length < 2) {
@@ -100,6 +112,8 @@ export async function searchBraveImages(query, apiKey, offset = 0) {
         source: getDomain(image.properties.url),
         thumbnail: image.properties.url, // Use the same URL for thumbnail
         imageUrl: image.properties.url,
+        width: image.properties.width || 0,
+        height: image.properties.height || 0,
       }));
   } catch (error) {
     console.error('[Brave Search] Search failed:', error.message);
