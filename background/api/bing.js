@@ -1,22 +1,23 @@
 // background/api/bing.js
 import { cleanHtml, getDomain } from '../utils/BUtils.js';
 
-// Scrape Bing Images HTML (no API) and extract image/page URLs from the iusc "m" JSON
 export async function searchBingImages(query, offset = 0, options = {}) {
   try {
-    const cleanQuery = (query || '').replace(/[^\w\s"'&:,.-]/g, ' ').trim();
-    if (!cleanQuery) return [];
+    // Send query as-is, like Google Images Large
+    const cleanQuery = query.trim();
+    if (!cleanQuery || cleanQuery.length < 2) return [];
 
     const sortMode = options.sortMode || 'recent';
     const base = 'https://www.bing.com/images/search';
     const params = new URLSearchParams({ q: cleanQuery });
-    // Prefer large photo images
+    
+    // Large photo images filter
     const qftBits = ['+filterui:imagesize-large', '+filterui:photo-photo'];
     if (sortMode === 'recent') {
-      // last 7 days for freshness
       qftBits.push('+filterui:age-lt7days');
     }
     params.set('qft', qftBits.join(''));
+    
     const first = Math.max(0, Number(offset) || 0);
     params.set('first', String(first));
     const url = `${base}?${params.toString()}`;
@@ -48,7 +49,7 @@ export async function searchBingImages(query, offset = 0, options = {}) {
           source: getDomain(pageUrl || imageUrl),
           thumbnail: meta.turl || imageUrl
         });
-        if (results.length >= 120) break;
+        if (results.length >= 50) break;
       } catch (_) { /* ignore parse errors */ }
     }
     return results;
@@ -57,4 +58,3 @@ export async function searchBingImages(query, offset = 0, options = {}) {
     return [];
   }
 }
-
