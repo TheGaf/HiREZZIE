@@ -3,6 +3,7 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { disambiguateResults } from '../utils/CelebrityDisambiguation.js';
 
 let seenImages = new Set();
 
@@ -97,26 +98,12 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
-    // Sort by quality: prioritize known large images, then file size, then unknown sizes
-    validImages.sort((a, b) => {
-        const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-        const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
-        const aBytes = Number(a.byteSize || 0);
-        const bBytes = Number(b.byteSize || 0);
-        
-        // Massive quality boost for 2MP+ images
-        const aQuality = aPixels >= 2_000_000 ? aPixels + 10_000_000 : aPixels;
-        const bQuality = bPixels >= 2_000_000 ? bPixels + 10_000_000 : bPixels;
-        
-        // If similar quality, prefer larger file size
-        if (Math.abs(aQuality - bQuality) < 500_000) {
-            return bBytes - aBytes;
-        }
-        
-        return bQuality - aQuality;
-    });
+    // Apply celebrity disambiguation before quality sorting
+    const disambiguatedImages = disambiguateResults(validImages, query);
     
-    return validImages;
+    console.log(`[BSearch] Returning ${disambiguatedImages.length} disambiguated images`);
+    
+    return disambiguatedImages;
 }
 
 export async function performSearch(query, categories, settings, offset = 0) {
