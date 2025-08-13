@@ -13,7 +13,18 @@ function resetCache() {
 function isValidImage(result) {
     const imageUrl = result.imageUrl || result.url;
     if (!imageUrl) return false;
-    return imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
+    if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) return false;
+    
+    // NEW: Slightly higher standards
+    const w = Number(result.width || 0);
+    const h = Number(result.height || 0);
+    const bytes = Number(result.byteSize || 0);
+    
+    // Must be at least 1500px on one side OR 1MB+ file
+    const bigEnough = (w >= 1500) || (h >= 1500);
+    const fatEnough = bytes >= 1_000_000; // 1MB instead of 500KB
+    
+    return bigEnough || fatEnough;
 }
 
 async function searchImages(query, apiKeys, offset = 0) {
