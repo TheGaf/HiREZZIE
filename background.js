@@ -1,5 +1,4 @@
-// Load configuration
-importScripts('config.js');
+// No importScripts needed - we'll load config from storage
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'searchImages') {
@@ -16,7 +15,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+async function getApiConfig() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['apiConfig'], (result) => {
+      resolve(result.apiConfig || {
+        google: { apiKey: '', searchEngineId: '' },
+        brave: { apiKey: '' },
+        serpapi: { apiKey: '' },
+        newsapi: { apiKey: '' }
+      });
+    });
+  });
+}
+
 async function searchImages(query) {
+  const API_CONFIG = await getApiConfig();
   const images = [];
   
   try {
@@ -24,9 +37,9 @@ async function searchImages(query) {
     
     // Try multiple sources in parallel
     const searches = [
-      searchSerpApiImages(query),
-      searchBraveImages(query), 
-      searchGoogleImages(query),
+      searchSerpApiImages(query, API_CONFIG),
+      searchBraveImages(query, API_CONFIG), 
+      searchGoogleImages(query, API_CONFIG),
       searchYahooImages(query),
       searchBingImages(query)
     ];
@@ -62,6 +75,153 @@ async function searchImages(query) {
     
   } catch (error) {
     console.error('❌ Search failed:', error);
+    return [];
+  }
+}
+
+async function searchSerpApiImages(query, config) {
+  try {
+    const apiKey = config.serpapi?.apiKey;
+    
+    if (!apiKey) {
+      console.log('🔶 SerpApi key not configured');
+      return [];
+    }
+    
+    console.log('🔶 Searching SerpApi...');
+    
+    const url = `https://serpapi.com/search.json?engine=google_images&q=${encodeURIComponent(query)}&ijn=0&api_key=${apiKey}&tbs=isz:l,imgo:1`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`SerpApi error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(`SerpApi: ${data.error}`);
+    }
+    
+    if (data.images_results) {
+      const images = data.images_results.slice(0, 20).map(item => ({
+        url: item.original,
+        thumbnail: item.thumbnail,
+        title: item.title || `${query} - Google`,
+        source: 'Google (SerpApi)',
+        sourceUrl: item.link,
+        width: item.original_width,
+        height: item.original_height
+      }));
+      
+      console.log(`🔶 SerpApi found ${images.length} images`);
+      return images;
+    }
+    
+    return [];
+    
+  } catch (error) {
+    console.error('🔶 SerpApi search error:', error);
+    return [];
+  }
+}
+
+async function searchBraveImages(query, config) {
+  try {
+    const apiKey = config.brave?.apiKey;
+    
+    if (!apiKey) {
+      console.log('🟠 Brave API key not configured');
+      return [];
+    }
+    
+    console.log('🟠 Searching Brave...');
+    
+    const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=20`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Brave API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.results) {
+      const images = data.results.map(item => ({
+        url: item.src,
+        thumbnail: item.thumbnail?.src || item.src,
+        title: item.title || `${query} - Brave`,
+        source: 'Brave',
+        sourceUrl: item.url,
+        width: item.properties?.width,
+        height: item.properties?.height
+      }));
+      
+      console.log(`🟠 Brave found ${images.length} images`);
+      return images;
+    }
+    
+    return [];
+    
+  } catch (error) {
+    console.error('🟠 Brave search error:', error);
+    return [];
+  }
+}
+
+async function searchGoogleImages(query, config) {
+  try {
+    const apiKey = config.google?.apiKey;
+    const searchEngineId = config.google?.searchEngineId;
+    
+    if (!apiKey || !searchEngineId) {
+      console.log('🔴 Google API key not configured');
+      return [];
+    }
+    
+    console.log('🔴 Searching Google...');
+    
+    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&searchType=image&imgSize=xlarge&num=10`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`Google API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(`Google: ${data.error.message}`);
+    }
+    
+    if (data.items) {
+      const images = data.items.map(item => ({
+        url: item.link,
+        thumbnail: item.image?.thumbnailLink || item.link,
+        title: item.title || `${query} - Google`,
+        source: 'Google',
+        sourceUrl: item.image?.contextLink || item.link,
+        width: item.image?.width,
+        height: item.image?.height
+      }));
+      
+      console.log(`🔴 Google found ${images.length} images`);
+      return images;
+    }
+    
+    return [];
+    
+  } catch (error) {
+    console.error('🔴 Google search error:', error);
     return [];
   }
 }
@@ -180,153 +340,6 @@ async function searchBingImages(query) {
     
   } catch (error) {
     console.error('🔵 Bing search error:', error);
-    return [];
-  }
-}
-
-async function searchSerpApiImages(query) {
-  try {
-    const apiKey = API_CONFIG.serpapi.apiKey;
-    
-    if (!apiKey) {
-      console.log('🔶 SerpApi key not configured');
-      return [];
-    }
-    
-    console.log('🔶 Searching SerpApi...');
-    
-    const url = `https://serpapi.com/search.json?engine=google_images&q=${encodeURIComponent(query)}&ijn=0&api_key=${apiKey}&tbs=isz:l,imgo:1`;
-    
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`SerpApi error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(`SerpApi: ${data.error}`);
-    }
-    
-    if (data.images_results) {
-      const images = data.images_results.slice(0, 20).map(item => ({
-        url: item.original,
-        thumbnail: item.thumbnail,
-        title: item.title || `${query} - Google`,
-        source: 'Google (SerpApi)',
-        sourceUrl: item.link,
-        width: item.original_width,
-        height: item.original_height
-      }));
-      
-      console.log(`🔶 SerpApi found ${images.length} images`);
-      return images;
-    }
-    
-    return [];
-    
-  } catch (error) {
-    console.error('🔶 SerpApi search error:', error);
-    return [];
-  }
-}
-
-async function searchBraveImages(query) {
-  try {
-    const apiKey = API_CONFIG.brave.apiKey;
-    
-    if (!apiKey) {
-      console.log('🟠 Brave API key not configured');
-      return [];
-    }
-    
-    console.log('🟠 Searching Brave...');
-    
-    const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=20`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip',
-        'X-Subscription-Token': apiKey
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Brave API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.results) {
-      const images = data.results.map(item => ({
-        url: item.src,
-        thumbnail: item.thumbnail?.src || item.src,
-        title: item.title || `${query} - Brave`,
-        source: 'Brave',
-        sourceUrl: item.url,
-        width: item.properties?.width,
-        height: item.properties?.height
-      }));
-      
-      console.log(`🟠 Brave found ${images.length} images`);
-      return images;
-    }
-    
-    return [];
-    
-  } catch (error) {
-    console.error('🟠 Brave search error:', error);
-    return [];
-  }
-}
-
-async function searchGoogleImages(query) {
-  try {
-    const apiKey = API_CONFIG.google.apiKey;
-    const searchEngineId = API_CONFIG.google.searchEngineId;
-    
-    if (!apiKey || !searchEngineId) {
-      console.log('🔴 Google API key not configured');
-      return [];
-    }
-    
-    console.log('🔴 Searching Google...');
-    
-    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&searchType=image&imgSize=xlarge&num=10`;
-    
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`Google API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(`Google: ${data.error.message}`);
-    }
-    
-    if (data.items) {
-      const images = data.items.map(item => ({
-        url: item.link,
-        thumbnail: item.image?.thumbnailLink || item.link,
-        title: item.title || `${query} - Google`,
-        source: 'Google',
-        sourceUrl: item.image?.contextLink || item.link,
-        width: item.image?.width,
-        height: item.image?.height
-      }));
-      
-      console.log(`🔴 Google found ${images.length} images`);
-      return images;
-    }
-    
-    return [];
-    
-  } catch (error) {
-    console.error('🔴 Google search error:', error);
     return [];
   }
 }
