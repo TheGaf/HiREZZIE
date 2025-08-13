@@ -14,16 +14,16 @@ export async function searchBrave(query, apiKey, offset = 0) {
     return [];
   }
 
-  // Clean up the query for better API compatibility
-  const cleanQuery = query.replace(/[^\w\s]/g, ' ').trim();
+  // Send raw query without character stripping
+  const rawQuery = String(query || '').trim();
   
-  // If query is too short or empty, return empty results
-  if (!cleanQuery || cleanQuery.length < 2) {
-    console.warn('[Brave Search] Query too short or empty');
+  // If query is empty, return empty results
+  if (!rawQuery) {
+    console.warn('[Brave Search] Query is empty');
     return [];
   }
 
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(cleanQuery)}&count=10&offset=${offset}`;
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(rawQuery)}&count=10&offset=${offset}`;
 
   try {
     const response = await fetch(url, {
@@ -66,16 +66,16 @@ export async function searchBraveImages(query, apiKey, offset = 0) {
     return [];
   }
 
-  // Clean up the query for better API compatibility
-  const cleanQuery = query.replace(/[^\w\s]/g, ' ').trim();
+  // Send raw query without character stripping
+  const rawQuery = String(query || '').trim();
   
-  // If query is too short or empty, return empty results
-  if (!cleanQuery || cleanQuery.length < 2) {
-    console.warn('[Brave Search] Query too short or empty');
+  // If query is empty, return empty results
+  if (!rawQuery) {
+    console.warn('[Brave Search] Query is empty');
     return [];
   }
 
-  const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(cleanQuery)}&count=10&offset=${offset}&safesearch=moderate&size=large`;
+  const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(rawQuery)}&count=10&offset=${offset}&safesearch=moderate&size=large`;
 
   try {
     const response = await fetch(url, {

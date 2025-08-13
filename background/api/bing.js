@@ -4,12 +4,13 @@ import { cleanHtml, getDomain } from '../utils/BUtils.js';
 // Scrape Bing Images HTML (no API) and extract image/page URLs from the iusc "m" JSON
 export async function searchBingImages(query, offset = 0, options = {}) {
   try {
-    const cleanQuery = (query || '').replace(/[^\w\s"'&:,.-]/g, ' ').trim();
-    if (!cleanQuery) return [];
+    // Send raw query without character stripping
+    const rawQuery = String(query || '').trim();
+    if (!rawQuery) return [];
 
     const sortMode = options.sortMode || 'recent';
     const base = 'https://www.bing.com/images/search';
-    const params = new URLSearchParams({ q: cleanQuery });
+    const params = new URLSearchParams({ q: rawQuery });
     // Prefer large photo images
     const qftBits = ['+filterui:imagesize-large', '+filterui:photo-photo'];
     if (sortMode === 'recent') {

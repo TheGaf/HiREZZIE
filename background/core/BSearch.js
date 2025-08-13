@@ -3,6 +3,7 @@ import { fetchOpenGraphData, headCheck } from '../utils/BUtils.js';
 import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
+import { searchBraveImages } from '../api/brave.js';
 
 // Simple deduplication cache
 let seenImages = new Set();
@@ -11,7 +12,7 @@ function resetCache() {
     seenImages.clear();
 }
 
-// Simple image validation - just check if it's a real image
+// Simple image validation - focus on high-res images
 async function isValidImage(result) {
     const imageUrl = result.imageUrl || result.url;
     if (!imageUrl) return false;
@@ -21,45 +22,32 @@ async function isValidImage(result) {
         return false;
     }
     
-    // If we have size info, prefer larger images
+    // Filter for high-res images: ≥1000px or ≥500KB
     const w = Number(result.width || 0);
     const h = Number(result.height || 0);
-    if (w && h && (w >= 400 || h >= 400)) {
+    const bytes = Number(result.byteSize || 0);
+    
+    if (w >= 1000 || h >= 1000 || bytes >= 500_000) {
         return true;
     }
     
-    // Otherwise accept everything that looks like an image
-    return true;
+    // If no size info available, accept it (will be filtered later if needed)
+    if (!w && !h && !bytes) {
+        return true;
+    }
+    
+    return false;
 }
 
-// Simple relevance scoring - prefer exact matches
+// Simple size-based sorting - largest images first
 function scoreResults(results, query) {
-    const queryLower = query.toLowerCase();
-    const searchTerms = queryLower.split(/\s+/).filter(Boolean);
-    
     return results.map(result => {
-        let score = 0;
-        const text = `${result.title || ''} ${result.snippet || ''} ${result.pageUrl || ''}`.toLowerCase();
-        
-        // Score based on term matches
-        searchTerms.forEach(term => {
-            if (text.includes(term)) {
-                score += 10;
-                if ((result.title || '').toLowerCase().includes(term)) {
-                    score += 5; // Bonus for title matches
-                }
-            }
-        });
-        
-        // Size bonus for large images
+        // Sort by pixel count, largest first
         const w = Number(result.width || 0);
         const h = Number(result.height || 0);
         const pixels = w * h;
-        if (pixels >= 4_000_000) score += 3; // 4MP+
-        else if (pixels >= 2_000_000) score += 2; // 2MP+
-        else if (w >= 1000 || h >= 1000) score += 1;
         
-        return { ...result, _score: score };
+        return { ...result, _score: pixels };
     });
 }
 
@@ -92,6 +80,15 @@ async function searchImages(query, apiKeys, offset = 0) {
             .then(results => results.map(r => ({ ...r, _source: 'Bing' })))
             .catch(() => [])
     );
+    
+    // Brave Images
+    if (apiKeys.brave) {
+        promises.push(
+            searchBraveImages(query, apiKeys.brave, offset)
+                .then(results => results.map(r => ({ ...r, _source: 'Brave' })))
+                .catch(() => [])
+        );
+    }
     
     // Get all results
     const results = await Promise.allSettled(promises);

@@ -83,12 +83,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
     
     console.log(`[BTrust] After filtering (English only): ${filteredResults.length} results`);
     
+    // Simple image de-duplication and high-res filtering
     let uniqueResults;
     if (filteredResults.length > 0 && filteredResults[0].category === 'images') {
-        // Special image de-duplication across different source sites
-        const deduped = dedupeImagesBySignature(filteredResults);
-        // Still guard against exact URL dupes
-        uniqueResults = deduped.filter(result => {
+        // Filter for high-res images: ≥1000px or ≥500KB
+        const highResResults = filteredResults.filter(result => {
+            const w = Number(result.width || 0);
+            const h = Number(result.height || 0);
+            const bytes = Number(result.byteSize || 0);
+            return w >= 1000 || h >= 1000 || bytes >= 500_000;
+        });
+        
+        // Simple deduplication by URL
+        uniqueResults = dedupeImagesBySignature(highResResults).filter(result => {
             const key = (result.imageUrl || result.url).toLowerCase().trim();
             if (seenResults.has(key)) return false;
             seenResults.add(key);
@@ -107,56 +114,26 @@ export function filterAndScoreResults(results, maxResults = 20) {
         });
     }
     
-    console.log(`[BTrust] After removing duplicates: ${uniqueResults.length} results`);
+    console.log(`[BTrust] After filtering for high-res and removing duplicates: ${uniqueResults.length} results`);
     
-    // Prefer high-resolution images and strong query coverage when category is images
-    const withHiResBoost = uniqueResults.map(result => {
-        let scoreBoost = 0;
-        if (result.category === 'images') {
-            const w = Number(result.width || 0);
-            const h = Number(result.height || 0);
-            const pixelCount = w * h;
-            // Boost if >= 4MP; stronger boost >= 8MP
-            if (pixelCount >= 8_000_000) scoreBoost += 2;
-            else if (pixelCount >= 4_000_000) scoreBoost += 1;
+    // Simple sorting by image size (largest first)
+    const withCurationFlag = uniqueResults.map(result => ({
+        ...result, 
+        curated: true,
+        curationMessage: "I personally curated this from the best sources available"
+    }));
 
-            // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
-            const query = (result._query || '').toLowerCase();
-            const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
-            const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
-            if (entities.length > 1) {
-                const all = entities.every(e => hay.includes(e));
-                const any = entities.some(e => hay.includes(e));
-                if (all) scoreBoost += 4; // strong co-occurrence
-                else if (any) scoreBoost += 1; // keep as padding if needed
-            } else {
-                // Fallback: token coverage when no clear entities
-                const tokens = query.split(/\s+/).filter(Boolean);
-                const matches = tokens.filter(t => hay.includes(t)).length;
-                if (matches >= Math.min(3, tokens.length)) scoreBoost += 2;
-                else if (matches >= 2) scoreBoost += 1;
-            }
+    // Sort by pixel count for images, otherwise keep original order
+    withCurationFlag.sort((a, b) => {
+        if (a.category === 'images' && b.category === 'images') {
+            const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
+            const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+            return bPixels - aPixels;
         }
-        const curatedResult = { 
-            ...result, 
-            curated: true,
-            curationMessage: "I personally curated this from the best sources available",
-            _hiresBoost: scoreBoost
-        };
-        console.log(`[BTrust] Curated result: "${result.title}" from "${result.source}"`);
-        return curatedResult;
+        return 0; // Keep original order for non-images
     });
 
-    // Simple sort: prioritize co-occurrence/hires boost and pixel count
-    withHiResBoost.sort((a, b) => {
-        const boostDiff = (b._hiresBoost || 0) - (a._hiresBoost || 0);
-        if (boostDiff !== 0) return boostDiff;
-        const pa = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-        const pb = (Number(b.width || 0) * Number(b.height || 0)) || 0;
-        return pb - pa;
-    });
-
-    return withHiResBoost.slice(0, maxResults);
+    return withCurationFlag.slice(0, maxResults);
 }
 
 // Function to reset the duplicate cache for new searches

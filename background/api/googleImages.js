@@ -11,9 +11,15 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
     return [];
   }
 
-  const quote = (s) => `"${s}"`;
+  // Send raw query without auto-quoting
+  const rawQuery = String(query || '').trim();
+  if (!rawQuery) {
+    console.warn('[Google Images API] Query is empty');
+    return [];
+  }
+
   const blacklist = options.blacklist || [];
-  const q = quote(String(query || '').trim()) + (blacklist.length ? ' ' + blacklist.map(d => `-site:${d}`).join(' ') : '');
+  const q = rawQuery + (blacklist.length ? ' ' + blacklist.map(d => `-site:${d}`).join(' ') : '');
   const start = Math.max(1, (offset % 90) + 1); // API allows start up to 91 for num=10
   const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}`
     + `&q=${encodeURIComponent(q)}`
@@ -50,10 +56,10 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
         publishedAt: new Date().toISOString()
       }));
 
-    // Pre-filter by Google-reported dimensions/bytes when present
+    // Filter for high-res images: ≥1000px or ≥500KB
     items = items.filter(it => {
-      const bigEnough = (it.width && it.width >= 2000) || (it.height && it.height >= 2000);
-      const fatEnough = it.byteSize && it.byteSize >= 1_500_000;
+      const bigEnough = (it.width && it.width >= 1000) || (it.height && it.height >= 1000);
+      const fatEnough = it.byteSize && it.byteSize >= 500_000; // 500KB
       return bigEnough || fatEnough;
     });
 
