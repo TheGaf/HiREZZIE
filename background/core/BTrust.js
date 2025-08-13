@@ -20,6 +20,101 @@ function isEnglishContent(title, snippet) {
 // Global cache to prevent duplicates across searches - reset on new search
 let seenResults = new Set();
 
+// Celebrity profession context mapping for disambiguation
+const CELEBRITY_CONTEXTS = {
+    // Music industry
+    'singer': ['music', 'album', 'song', 'concert', 'tour', 'billboard', 'grammy', 'spotify', 'musician', 'artist', 'vocalist'],
+    'musician': ['music', 'album', 'song', 'concert', 'tour', 'billboard', 'grammy', 'spotify', 'band', 'artist'],
+    'rapper': ['rap', 'hip hop', 'album', 'music', 'billboard', 'grammy', 'spotify', 'track'],
+    
+    // Entertainment industry
+    'actress': ['movie', 'film', 'tv', 'television', 'series', 'show', 'hollywood', 'oscar', 'emmy', 'director', 'cinema'],
+    'actor': ['movie', 'film', 'tv', 'television', 'series', 'show', 'hollywood', 'oscar', 'emmy', 'director', 'cinema'],
+    'director': ['movie', 'film', 'tv', 'television', 'series', 'show', 'hollywood', 'oscar', 'emmy', 'cinema'],
+    
+    // Sports
+    'nfl': ['football', 'quarterback', 'touchdown', 'super bowl', 'draft', 'playoff', 'sports', 'athlete', 'team'],
+    'nba': ['basketball', 'nba', 'playoff', 'championship', 'sports', 'athlete', 'team', 'court'],
+    'athlete': ['sports', 'championship', 'olympics', 'competition', 'team', 'training'],
+    
+    // Other professions
+    'model': ['fashion', 'runway', 'photoshoot', 'vogue', 'modeling', 'catwalk'],
+    'influencer': ['social media', 'instagram', 'tiktok', 'youtube', 'followers', 'content creator'],
+    'politician': ['politics', 'government', 'senator', 'congress', 'election', 'campaign']
+};
+
+/**
+ * Analyzes celebrity context from image metadata to disambiguate between people with similar names
+ * @param {string} query - The search query
+ * @param {string} metadata - Combined metadata (title, description, alt text, etc.)
+ * @returns {Object} Context analysis with profession hints and confidence
+ */
+function analyzeCelebrityContext(query, metadata) {
+    const queryLower = query.toLowerCase();
+    const metaLower = metadata.toLowerCase();
+    
+    // Extract potential celebrity names from query (look for multiple words that could be names)
+    const words = query.split(/\s+/);
+    const potentialNames = [];
+    
+    // Look for sequences of 2+ capitalized words or common name patterns
+    for (let i = 0; i < words.length - 1; i++) {
+        const twoWords = words[i] + ' ' + words[i + 1];
+        // Check if it looks like a name (starts with capital or is commonly capitalized)
+        if (/^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(twoWords) || 
+            /^[a-z]+\s+[a-z]+/.test(twoWords.toLowerCase()) && twoWords.length >= 6) {
+            potentialNames.push(twoWords);
+        }
+    }
+    
+    // Check for profession context in metadata
+    const foundContexts = {};
+    let totalContextScore = 0;
+    
+    for (const [profession, keywords] of Object.entries(CELEBRITY_CONTEXTS)) {
+        let contextScore = 0;
+        let keywordMatches = [];
+        
+        for (const keyword of keywords) {
+            if (metaLower.includes(keyword)) {
+                contextScore += 1;
+                keywordMatches.push(keyword);
+                
+                // Boost score if keyword appears multiple times or in title
+                const occurrences = (metaLower.match(new RegExp(keyword, 'g')) || []).length;
+                if (occurrences > 1) contextScore += 0.5;
+            }
+        }
+        
+        if (contextScore > 0) {
+            foundContexts[profession] = {
+                score: contextScore,
+                keywords: keywordMatches
+            };
+            totalContextScore += contextScore;
+        }
+    }
+    
+    // Determine primary profession context
+    let primaryContext = null;
+    let primaryScore = 0;
+    for (const [profession, data] of Object.entries(foundContexts)) {
+        if (data.score > primaryScore) {
+            primaryContext = profession;
+            primaryScore = data.score;
+        }
+    }
+    
+    return {
+        potentialNames,
+        primaryContext,
+        primaryScore,
+        allContexts: foundContexts,
+        totalScore: totalContextScore,
+        hasContext: totalContextScore > 0
+    };
+}
+
 function normalizeImageSignature(imageUrl, width, height) {
     try {
         const url = new URL(imageUrl);
@@ -120,19 +215,65 @@ export function filterAndScoreResults(results, maxResults = 20) {
             if (pixelCount >= 8_000_000) scoreBoost += 2;
             else if (pixelCount >= 4_000_000) scoreBoost += 1;
 
-            // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
+            // Enhanced co-occurrence boost with celebrity disambiguation
             const query = (result._query || '').toLowerCase();
             const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
+            
+            // Analyze celebrity context for disambiguation
+            const contextAnalysis = analyzeCelebrityContext(query, hay);
+            
             if (entities.length > 1) {
                 const all = entities.every(e => hay.includes(e));
                 const any = entities.some(e => hay.includes(e));
-                if (all) scoreBoost += 4; // strong co-occurrence
-                else if (any) scoreBoost += 1; // keep as padding if needed
+                
+                if (all) {
+                    scoreBoost += 4; // strong co-occurrence
+                    
+                    // Additional boost if celebrity context is consistent
+                    if (contextAnalysis.hasContext) {
+                        scoreBoost += 2;
+                        console.log(`[BTrust] Celebrity context boost: ${contextAnalysis.primaryContext} (${contextAnalysis.primaryScore} keywords)`);
+                    }
+                } else if (any) {
+                    // Check for celebrity context conflicts
+                    if (contextAnalysis.hasContext) {
+                        // If we have strong context but not all entities match, this might be wrong celebrity
+                        const nameInQuery = contextAnalysis.potentialNames.some(name => 
+                            entities.some(entity => entity.includes(name.toLowerCase().split(' ')[0]))
+                        );
+                        
+                        if (nameInQuery && contextAnalysis.primaryScore >= 2) {
+                            // Strong context but missing entities suggests wrong celebrity
+                            scoreBoost -= 2;
+                            console.log(`[BTrust] Celebrity context conflict detected, reducing score for: ${result.title}`);
+                        } else {
+                            scoreBoost += 1; // keep as padding if needed
+                        }
+                    } else {
+                        scoreBoost += 1; // keep as padding if needed
+                    }
+                }
             } else {
-                // Fallback: token coverage when no clear entities
+                // Single entity search - enhanced with celebrity context
                 const tokens = query.split(/\s+/).filter(Boolean);
                 const matches = tokens.filter(t => hay.includes(t)).length;
+                
+                // Apply celebrity context scoring for single-name searches
+                if (contextAnalysis.hasContext && contextAnalysis.potentialNames.length > 0) {
+                    // Check if query contains a celebrity name
+                    const queryContainsCelebrity = contextAnalysis.potentialNames.some(name => 
+                        query.toLowerCase().includes(name.toLowerCase())
+                    );
+                    
+                    if (queryContainsCelebrity) {
+                        // Boost for relevant celebrity context
+                        scoreBoost += Math.min(3, contextAnalysis.primaryScore);
+                        console.log(`[BTrust] Celebrity-specific boost: ${contextAnalysis.primaryContext}`);
+                    }
+                }
+                
+                // Original token-based scoring
                 if (matches >= Math.min(3, tokens.length)) scoreBoost += 2;
                 else if (matches >= 2) scoreBoost += 1;
             }
@@ -148,11 +289,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
     });
 
     // Simple sort: prioritize co-occurrence/hires boost and pixel count
+    const sorted = withHiResBoost.sort((a, b) => {
+        const aScore = (a._hiresBoost || 0);
+        const bScore = (b._hiresBoost || 0);
+        if (aScore !== bScore) return bScore - aScore;
+        
+        // Fallback to pixel count
+        const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
+        const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+        return bPixels - aPixels;
+    });
 
-// Boost if >= 4MP; stronger boost >= 8MP, medium boost >= 2MP
-if (pixelCount >= 8_000_000) scoreBoost += 3;
-else if (pixelCount >= 4_000_000) scoreBoost += 2;
-else if (pixelCount >= 2_000_000) scoreBoost += 1;
+    return sorted.slice(0, maxResults);
+}
 
 // Function to reset the duplicate cache for new searches
 export function resetDuplicateCache() {
