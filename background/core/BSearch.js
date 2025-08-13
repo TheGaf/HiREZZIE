@@ -146,10 +146,10 @@ function relevanceFirstFilter(results, maxResults = 50, query = '') {
     console.log(`[BSearch] After deduplication: ${uniqueResults.length} results`);
     
     // BALANCED OR LOGIC - Ensure fair representation of all terms
+    const queryLower = query.toLowerCase(); // ← FIXED: Added missing variable declaration
     const scoredResults = uniqueResults.map(result => {
         let score = 0;
         
-        const queryLower = (query || result._query || '').toLowerCase();
         const searchTerms = queryLower.split(/\s+/).filter(Boolean);
         
         // Check all available text fields for ANY search term (OR logic)
