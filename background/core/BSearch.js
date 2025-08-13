@@ -218,21 +218,27 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             const requireAll = settings?.searchConfig?.requireAllTerms === true;
             const minMP = settings?.searchConfig?.minImageMegaPixels || 0;
 
+            // FIXED: More lenient content matching for multi-entity searches
             const contentMatches = (r, relaxedMin = null) => {
                 const hay = `${r.ogTitle || ''} ${r.ogDescription || ''} ${r.ogAlt || ''} ${r.title || ''} ${r.pageUrl || r.url || ''}`.toLowerCase();
-                // For multi-entity queries, require both entities or allow at least one strong match when relaxed
-                if (!phrases.every(p => hay.includes(p))) return false; // always require phrases
+                
+                // Always require exact phrases if present
+                if (!phrases.every(p => hay.includes(p))) return false;
+                
+                // For multi-entity queries (like "clairo laufey"), be more flexible
                 if (entities.length > 1) {
                     const entityMatches = entities.filter(e => hay.includes(e)).length;
-                    if (relaxedMin !== null) {
-                        if (entityMatches < 1) return false;
-                    } else if (entityMatches < 2) {
-                        return false;
-                    }
+                    // RELAXED: Allow if at least ONE entity matches (not both)
+                    if (entityMatches < 1) return false;
+                    // If we have both entities, that's a bonus but not required
+                    return true;
                 }
+                
+                // For single queries or when no entities detected, check terms
                 if (terms.length === 0) return true;
-                if (requireAll && relaxedMin === null) return terms.every(t => hay.includes(t));
-                const minMatches = relaxedMin ?? 1;
+                
+                // RELAXED: Only require 1 term match for multi-term queries
+                const minMatches = Math.min(1, terms.length);
                 const matched = terms.filter(t => hay.includes(t)).length;
                 return matched >= minMatches;
             };
@@ -240,9 +246,16 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             // Two-stage: soft filter first to avoid zeroes, then hard filter if still big pool
             let softKept = [];
             for (const r of resultsWithCategory) {
-                if (contentMatches(r, entities.length > 1 ? 1 : 2)) softKept.push(r);
+                // EVEN MORE RELAXED first pass - just need ANY term
+                const hay = `${r.ogTitle || ''} ${r.ogDescription || ''} ${r.ogAlt || ''} ${r.title || ''} ${r.pageUrl || r.url || ''}`.toLowerCase();
+                const hasAnyTerm = terms.some(t => hay.includes(t)) || entities.some(e => hay.includes(e));
+                if (hasAnyTerm || phrases.every(p => hay.includes(p))) {
+                    softKept.push(r);
+                }
             }
-            if (softKept.length === 0) softKept = resultsWithCategory; // fallback
+            if (softKept.length === 0) softKept = resultsWithCategory; // fallback to all
+
+            // Then apply stricter filtering only if we have enough candidates
             const strictlyKept = [];
             for (const r of softKept) {
                 if (!contentMatches(r)) continue;
@@ -250,8 +263,10 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 const mp = hasDims ? ((Number(r.width) * Number(r.height)) / 1_000_000) : 0;
                 if (!hasDims || mp >= minMP) strictlyKept.push(r);
             }
+
+            // Use strict results if we have enough, otherwise fall back to soft
             while (resultsWithCategory.length) resultsWithCategory.pop();
-            resultsWithCategory.push(...(strictlyKept.length ? strictlyKept : softKept));
+            resultsWithCategory.push(...(strictlyKept.length >= 10 ? strictlyKept : softKept));
 
             // HEAD verification to enforce size/type and fix broken links (prefer direct images on same page)
             const checks = await Promise.allSettled(resultsWithCategory.slice(0, 160).map(async r => {
