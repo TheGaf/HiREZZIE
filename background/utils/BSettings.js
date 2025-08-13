@@ -2,35 +2,26 @@
 
 const DEFAULT_SETTINGS = {
     apiKeys: {
-        // News APIs
-        gnews: 'GNEWS_KEY',
-        newsapi_org: 'NEWSAPI_AI_KEY',
-        newsapi_ai: 'NEWSAPI_AI_KEY',
-        
-        // Image APIs (High-res web images only, no stock photos)
-        serpApi: 'SERPAPI_KEY',
+        gnews: process.env.GNEWS_KEY,
+        newsapi_org: process.env.NEWSAPI_ORG_KEY,
+        newsapi_ai: process.env.NEWSAPI_AI_KEY,
+        serpApi: process.env.SERPAPI_KEY,
         googleImages: {
-            apiKey: 'GOOGLEIMAGES_KEY',
-            cx: '452a8aa1a91e64d00'
+            apiKey: process.env.GOOGLEIMAGES_KEY,
+            cx: process.env.GOOGLEIMAGES_CX // if you want cx from env too
         },
-        
-        // Video APIs
-        youtube: 'YOUTUBE_KEY',
-        vimeo: 'VIMEO_KEY',
-        
-        // Search APIs
-        brave: 'BRAVE_KEY',
-        google_search: 'GOOGLE_SEARCH_KEY',
-        
-        // AI APIs (for future use)
-        openai: 'OPENAI_KEY',
-        groq: 'GROQ_KEY'
+        youtube: process.env.YOUTUBE_KEY,
+        vimeo: process.env.VIMEO_KEY,
+        brave: process.env.BRAVE_KEY,
+        google_search: process.env.GOOGLE_SEARCH_KEY,
+        openai: process.env.OPENAI_KEY,
+        groq: process.env.GROQ_KEY // fixed typo from GROG_KEY
     },
     searchConfig: {
         newsFreshnessDays: 90,
         maxResultsPerCategory: 50,
-            preferGoogleCSE: true,
-            usePaidImageAPIs: false,
+        preferGoogleCSE: true,
+        usePaidImageAPIs: false,
         minImageMegaPixels: 4,
         requireAllTerms: true
     }
