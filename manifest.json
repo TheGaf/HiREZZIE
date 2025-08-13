@@ -22,6 +22,10 @@
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [{
+    "resources": ["config.js"],
+    "matches": ["<all_urls>"]
+  }],
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
