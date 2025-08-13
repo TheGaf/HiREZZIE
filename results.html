@@ -13,7 +13,11 @@
       <div class="brarian-logo">
         <img src="HIRezzie.png" alt="hiREZZIE" id="brarianLogo" />
       </div>
-      <div class="built-by">built by <a href="https://gaf.nyc" target="_blank" rel="noopener noreferrer"><img src="BG_QR.webp" alt="gaf.nyc" class="qr-bug" onerror="this.style.display='none'"></a></div>
+      <div class="built-by">
+        built by <a href="https://gaf.nyc" target="_blank" rel="noopener noreferrer">
+          <img src="BG_QR.webp" alt="gaf.nyc" class="qr-bug" onerror="this.style.display='none'">
+        </a>
+      </div>
       
       <div class="search-bar" role="search">
         <input 
@@ -24,20 +28,14 @@
         >
         <button id="searchBtn" type="button">Search</button>
       </div>
-      <div class="sort-toggle" aria-label="Sort mode">
-        <span>Recent</span>
-        <label class="switch">
-          <input type="checkbox" id="sortToggle">
-          <span class="slider"></span>
-        </label>
-        <span>Relevant</span>
-      </div>
-      
-      <!-- Simplified: only images category will render below -->
     </div>
     
     <main id="results" role="main" aria-live="polite">
-      <div class="loading"><span id="loadingText">Finding HiRes images takes time. Please wait.</span> <span class="heart">❤️</span><span id="timer">0.0s</span></div>
+      <div class="loading">
+        <span id="loadingText">Finding HiRes images takes time. Please wait.</span> 
+        <span class="heart">❤️</span>
+        <span id="timer">0.0s</span>
+      </div>
       <div class="disclaimer">Public web previews only — obtain proper licenses before use.</div>
       
       <div id="imageGrid" class="results-grid"></div>
