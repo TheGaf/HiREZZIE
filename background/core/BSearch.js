@@ -17,7 +17,7 @@ function detectCollaborationIntent(query) {
     const normalized = query.toLowerCase().trim();
     
     // Split on collaboration keywords and common separators
-    const collaborationPattern = /\s+(?:and|&|vs|x|with|feat\.?|featuring|,|\+|×)+\s+/i;
+    const collaborationPattern = /\s+(?:and|&|vs|x|with|feat\.?|featuring|,|\+|×|duet|collab|collaboration)+\s+/i;
     const entities = normalized.split(collaborationPattern).map(s => s.trim()).filter(Boolean);
     
     // Also check for simple space-separated artist names (common pattern)
@@ -98,14 +98,19 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                     `"${entity1}" "${entity2}"`, // Quoted for exact matching
                     `"${entity1} and ${entity2}"`, // Explicit collaboration
                     `"${entity1} with ${entity2}"`, // With variant
-                    `${entity1} ${entity2} together`, // Together keyword
                     `${entity1} ${entity2} collaboration`, // Collaboration keyword
+                    `${entity1} ${entity2} duet`, // Duet keyword
+                    `${entity1} ${entity2} featuring`, // Featuring keyword
+                    `${entity1} ${entity2} together`, // Together keyword
+                    `${entity1} ${entity2} performance`, // Performance keyword
+                    `${entity1} ${entity2} concert`, // Concert keyword
                     `${entity1} ${entity2} photo`, // Photo keyword
+                    `${entity1} ${entity2} song`, // Song keyword
                     collaboration.hasExplicitCollaborationWords ? query : `${entity1} and ${entity2}`, // Enhanced original
                     query // Original as final fallback
                 ];
                 
-                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 4));
+                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 6));
             }
             
             // Use the most specific query for API calls
@@ -120,6 +125,9 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                     if ((a.includes('jordan') && b.includes('pippen')) || (a.includes('pippen') && b.includes('jordan'))) {
                         apiQuery = '"Michael Jordan" "Scottie Pippen"';
                         if (/\bgame\b|\bbulls\b/i.test(query)) apiQuery += ' (game OR Bulls)';
+                    } else if ((a.includes('laufey') && b.includes('clairo')) || (a.includes('clairo') && b.includes('laufey'))) {
+                        // Special handling for Laufey + Clairo collaboration
+                        apiQuery = '"Laufey" "Clairo"';
                     } else {
                         // General collaboration query enhancement
                         apiQuery = `"${a}" "${b}"`;
@@ -146,8 +154,8 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                 break;
             }
             
-            // Enhanced API calls with collaboration context
-            if (searchConfig?.preferGoogleCSE && apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
+            // Enhanced API calls with collaboration context - PRIORITIZE GOOGLE IMAGES
+            if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
                 const opt = await new Promise(resolve => chrome.storage.sync.get(['blacklist','imgSize','minWidth','minHeight','minBytes','exactDefault'], resolve));
                 const blacklist = opt.blacklist || [];
                 const mergedOptions = { 
@@ -157,12 +165,27 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                     imgSize: opt.imgSize,
                     collaboration: collaboration // Pass collaboration context
                 };
-                promises.push(searchGoogleImages(apiQuery, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset, mergedOptions));
+                
+                // Try multiple collaboration queries with Google Images
+                if (collaboration.isCollaboration && searchQueries.length > 1) {
+                    for (let i = 0; i < Math.min(3, searchQueries.length); i++) {
+                        promises.push(searchGoogleImages(searchQueries[i], apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset + (i * 10), mergedOptions));
+                    }
+                } else {
+                    promises.push(searchGoogleImages(apiQuery, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset, mergedOptions));
+                }
             }
             
             // Free fallback image sources with enhanced queries
-            promises.push(searchBraveImages(apiQuery, apiKeys.brave, offset));
-            const bingOffsets2 = [0, 50, 100, 150, 200];
+            if (apiKeys.brave) {
+                promises.push(searchBraveImages(apiQuery, apiKeys.brave, offset));
+                // Try additional collaboration queries with Brave
+                if (collaboration.isCollaboration && searchQueries.length > 1) {
+                    promises.push(searchBraveImages(searchQueries[1], apiKeys.brave, offset));
+                }
+            }
+            
+            const bingOffsets2 = [0, 50, 100];
             for (const off of bingOffsets2) {
                 promises.push(searchBingImages(apiQuery, off, { sortMode }));
             }
@@ -334,6 +357,8 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                         if (entityMatches >= 2) return true; // Perfect match
                         if (entityMatches >= 1 && hay.includes('and')) return true; // Single entity + collaboration word
                         if (entityMatches >= 1 && hay.includes('with')) return true; // Single entity + with
+                        if (entityMatches >= 1 && hay.includes('featuring')) return true; // Single entity + featuring
+                        if (entityMatches >= 1 && hay.includes('duet')) return true; // Single entity + duet
                         return entityMatches >= 1; // Single entity as fallback
                     }
                 };
