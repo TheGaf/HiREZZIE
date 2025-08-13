@@ -17,7 +17,13 @@ const DEFAULT_SETTINGS = {
         openai: '',
         groq: ''
     },
-
+    searchConfig: {
+        usePaidImageAPIs: true,
+        preferGoogleCSE: false,
+        requireAllTerms: false,
+        minImageMegaPixels: 2
+    }
+};
 
 export async function getSettings() {
     return new Promise((resolve) => {
