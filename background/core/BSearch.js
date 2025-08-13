@@ -12,10 +12,67 @@ import { searchBrave } from '../api/brave.js';
 import { searchBraveImages } from '../api/brave.js';
 import { searchBingImages } from '../api/bing.js';
 
+// Enhanced collaboration detection function
+function detectCollaborationIntent(query) {
+    const normalized = query.toLowerCase().trim();
+    
+    // Split on collaboration keywords and common separators
+    const collaborationPattern = /\s+(?:and|&|vs|x|with|feat\.?|featuring|,|\+|×)+\s+/i;
+    const entities = normalized.split(collaborationPattern).map(s => s.trim()).filter(Boolean);
+    
+    // Also check for simple space-separated artist names (common pattern)
+    const spaceEntities = normalized.split(/\s+/).filter(Boolean);
+    const hasMultipleWords = spaceEntities.length >= 2;
+    
+    // Check if this looks like multiple people/artists
+    const hasMultipleEntities = entities.length >= 2;
+    const hasCollaborationKeywords = collaborationPattern.test(normalized);
+    
+    // Detect common artist name patterns (two capitalized words often = two artists)
+    const capitalizedWords = query.split(/\s+/).filter(word => 
+        word.length > 2 && word[0] === word[0].toUpperCase()
+    );
+    const likelyMultipleArtists = capitalizedWords.length >= 2 && hasMultipleWords;
+    
+    const isCollaboration = hasMultipleEntities || hasCollaborationKeywords || likelyMultipleArtists;
+    
+    // Use the most specific entity split available
+    let finalEntities;
+    if (hasMultipleEntities) {
+        finalEntities = entities;
+    } else if (likelyMultipleArtists && capitalizedWords.length === 2) {
+        finalEntities = capitalizedWords;
+    } else {
+        finalEntities = [normalized];
+    }
+    
+    console.log(`[BSearch] Collaboration detection:`, {
+        query,
+        isCollaboration,
+        entities: finalEntities,
+        hasMultipleEntities,
+        hasCollaborationKeywords,
+        likelyMultipleArtists
+    });
+    
+    return {
+        isCollaboration,
+        entities: finalEntities,
+        originalQuery: query,
+        hasExplicitCollaborationWords: hasCollaborationKeywords
+    };
+}
+
+// Enhanced search category function with collaboration support
 async function searchCategory(category, query, apiKeys, searchConfig, offset = 0, options = {}) {
     console.log(`[BSearch] Searching category: ${category} for query: "${query}" with offset: ${offset}`);
+    
+    // Detect collaboration intent
+    const collaboration = detectCollaborationIntent(query);
+    
     let promises = [];
     const sortMode = options.sortMode || 'recent';
+    
     switch (category) {
         case 'articles':
             // Wider window if relevant; otherwise recent only
@@ -28,68 +85,109 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             }
             promises.push(searchBrave(query, apiKeys.brave, offset));
             break;
+            
         case 'images':
-            // Build a refined query for image engines to improve co-occurrence (no hard blocks)
-            let refinedQuery = query;
+            // Build enhanced query variants for collaborations
+            let searchQueries = [query]; // Original query as fallback
+            
+            if (collaboration.isCollaboration && collaboration.entities.length >= 2) {
+                const [entity1, entity2] = collaboration.entities.slice(0, 2); // Take first two
+                
+                // Create multiple query variants optimized for finding collaborations
+                searchQueries = [
+                    `"${entity1}" "${entity2}"`, // Quoted for exact matching
+                    `"${entity1} and ${entity2}"`, // Explicit collaboration
+                    `"${entity1} with ${entity2}"`, // With variant
+                    `${entity1} ${entity2} together`, // Together keyword
+                    `${entity1} ${entity2} collaboration`, // Collaboration keyword
+                    `${entity1} ${entity2} photo`, // Photo keyword
+                    collaboration.hasExplicitCollaborationWords ? query : `${entity1} and ${entity2}`, // Enhanced original
+                    query // Original as final fallback
+                ];
+                
+                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 4));
+            }
+            
+            // Use the most specific query for API calls
+            const refinedQuery = searchQueries[0];
+            
+            // Build a refined query for image engines to improve co-occurrence
+            let apiQuery = refinedQuery;
             try {
-                const parts = String(query).split(/\s+(?:and|&|vs|x|with|,|\+)+\s+/i).map(s => s.trim()).filter(Boolean);
-                if (parts.length >= 2) {
-                    // Special-case common ambiguous names
-                    const a = parts[0].toLowerCase();
-                    const b = parts[1].toLowerCase();
+                if (collaboration.isCollaboration && collaboration.entities.length >= 2) {
+                    const [a, b] = collaboration.entities;
+                    // Special handling for known ambiguous cases
                     if ((a.includes('jordan') && b.includes('pippen')) || (a.includes('pippen') && b.includes('jordan'))) {
-                        refinedQuery = '"Michael Jordan" "Scottie Pippen"';
-                        if (/\bgame\b|\bbulls\b/i.test(query)) refinedQuery += ' (game OR Bulls)';
+                        apiQuery = '"Michael Jordan" "Scottie Pippen"';
+                        if (/\bgame\b|\bbulls\b/i.test(query)) apiQuery += ' (game OR Bulls)';
                     } else {
-                        refinedQuery = parts.map(p => `"${p}"`).join(' ');
+                        // General collaboration query enhancement
+                        apiQuery = `"${a}" "${b}"`;
                     }
                 }
-                // No negative terms; we rely on downstream content filtering for relevance
-            } catch {}
+            } catch (e) {
+                console.warn('[BSearch] Query enhancement failed, using original:', e);
+            }
+            
             // Free-only mode: build images from article sources by extracting OG images
             if (searchConfig?.usePaidImageAPIs === false) {
-                // Recent mode uses day windows; Relevant removes date window entirely (null) plus a couple of recency tiers
                 const dayWindows = (sortMode === 'relevant') ? [null, 30, 90] : [1, 3, 7];
                 for (const d of dayWindows) {
-                    promises.push(searchGNews(query, apiKeys.gnews, offset, d));
-                    promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, d));
+                    promises.push(searchGNews(apiQuery, apiKeys.gnews, offset, d));
+                    promises.push(searchNewsAPIOrg(apiQuery, apiKeys.newsapi_org, searchConfig, offset, d));
                 }
-                // Free sources
-                promises.push(searchBrave(refinedQuery, apiKeys.brave, offset));
-                promises.push(searchBraveImages(refinedQuery, apiKeys.brave, offset));
-                // Pull multiple Bing pages to ensure volume
+                promises.push(searchBrave(apiQuery, apiKeys.brave, offset));
+                promises.push(searchBraveImages(apiQuery, apiKeys.brave, offset));
+                
                 const bingOffsets = [0, 50, 100, 150, 200];
                 for (const off of bingOffsets) {
-                    promises.push(searchBingImages(refinedQuery, off, { sortMode }));
+                    promises.push(searchBingImages(apiQuery, off, { sortMode }));
                 }
                 break;
             }
-            // Otherwise, combine sources per preference
+            
+            // Enhanced API calls with collaboration context
             if (searchConfig?.preferGoogleCSE && apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
-                // Load runtime options (blacklist, min sizes)
                 const opt = await new Promise(resolve => chrome.storage.sync.get(['blacklist','imgSize','minWidth','minHeight','minBytes','exactDefault'], resolve));
                 const blacklist = opt.blacklist || [];
-                const mergedOptions = { ...options, exactPhrases: (options.exactPhrases ?? opt.exactDefault ?? true), blacklist, imgSize: opt.imgSize };
-                // Use refinedQuery for better co-occurrence
-                promises.push(searchGoogleImages(refinedQuery, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset, mergedOptions));
+                const mergedOptions = { 
+                    ...options, 
+                    exactPhrases: collaboration.isCollaboration ? true : (options.exactPhrases ?? opt.exactDefault ?? true), 
+                    blacklist, 
+                    imgSize: opt.imgSize,
+                    collaboration: collaboration // Pass collaboration context
+                };
+                promises.push(searchGoogleImages(apiQuery, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset, mergedOptions));
             }
-            // Free fallback image sources
-            promises.push(searchBraveImages(refinedQuery, apiKeys.brave, offset));
+            
+            // Free fallback image sources with enhanced queries
+            promises.push(searchBraveImages(apiQuery, apiKeys.brave, offset));
             const bingOffsets2 = [0, 50, 100, 150, 200];
             for (const off of bingOffsets2) {
-                promises.push(searchBingImages(refinedQuery, off, { sortMode }));
+                promises.push(searchBingImages(apiQuery, off, { sortMode }));
             }
-            // Paid SerpApi only when enabled
+            
+            // Paid SerpApi with collaboration support
             if (apiKeys?.serpApi && searchConfig?.usePaidImageAPIs) {
-                promises.push(searchSerpApiImages(refinedQuery, apiKeys.serpApi, offset, options));
+                const serpOptions = { 
+                    ...options, 
+                    collaboration: collaboration,
+                    queryVariants: searchQueries.slice(0, 5), // Top 5 variants for maximum coverage
+                    exactPhrases: collaboration.isCollaboration ? true : options.exactPhrases
+                };
+                promises.push(searchSerpApiImages(apiQuery, apiKeys.serpApi, offset, serpOptions));
             }
-            // promises.push(searchBraveImages(query, apiKeys.brave, offset)); // 422 error
             break;
+            
         case 'videos':
-            // Use working video APIs only
-            promises.push(searchYouTube(query, apiKeys.youtube, offset));
-            // promises.push(searchVimeo(query, apiKeys.vimeo, offset)); // 401 error
-            // promises.push(searchDailymotion(query, offset)); // 400 error
+            // Enhanced video search for collaborations
+            let videoQuery = query;
+            if (collaboration.isCollaboration && collaboration.entities.length >= 2) {
+                const [entity1, entity2] = collaboration.entities;
+                videoQuery = `"${entity1}" "${entity2}"`;
+            }
+            
+            promises.push(searchYouTube(videoQuery, apiKeys.youtube, offset));
             break;
     }
 
@@ -102,11 +200,21 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
         .flatMap(res => res.value);
     
     console.log(`[BSearch] Valid results for ${category}: ${validResults.length} (offset: ${offset})`);
+    
+    // Add collaboration context to each result for downstream processing
+    const resultsWithContext = validResults.map(result => ({ 
+        ...result, 
+        category, 
+        _query: query,
+        _collaboration: collaboration
+    }));
+    
     // Prefer images with inherent large dimensions if provided
     if (category === 'images') {
-        validResults.sort((a, b) => ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0)));
+        resultsWithContext.sort((a, b) => ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0)));
     }
-    return { items: validResults, totalValid: validResults.length };
+    
+    return { items: resultsWithContext, totalValid: validResults.length };
 }
 
 export async function performSearch(query, categories, settings, offset = 0, options = {}) {
@@ -123,8 +231,7 @@ export async function performSearch(query, categories, settings, offset = 0, opt
         const categoryResultsObj = await searchCategory(category, query, apiKeys, searchConfig, offset, { ...options, pass: 'strict' });
         const categoryResults = categoryResultsObj.items || categoryResultsObj;
         totalValidMeta[category] = categoryResultsObj.totalValid || (categoryResults?.length || 0);
-        // Add category and original query to each result for downstream scoring
-        const resultsWithCategory = categoryResults.map(result => ({ ...result, category, _query: query }));
+        
         // For images, compute phrase/term context but defer strict filtering until after OG/ALT enrichment
         if (category === 'images') {
             const qNorm = query.toLowerCase();
@@ -140,7 +247,7 @@ export async function performSearch(query, categories, settings, offset = 0, opt
 
         // For images, extract from article pages: get Open Graph/Twitter/candidate images
         if (category === 'images') {
-            for (const result of resultsWithCategory) {
+            for (const result of categoryResults) {
                 try {
                     const direct = result.imageUrl || result.url || '';
                     if (/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(direct)) {
@@ -175,95 +282,146 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 } catch (e) { /* ignore */ }
             }
 
-            // Stronger de-duplication: collapse by normalized image filename key
+            // Enhanced de-duplication with collaboration awareness
             const normalizeKey = (u) => {
                 try {
                     const url = new URL(u);
                     let name = (url.pathname.split('/').pop() || '').toLowerCase();
-                    // strip params-like suffixes and common size suffixes
                     name = name.replace(/\.(jpg|jpeg|png|webp|gif)(?:\?.*)?$/, '');
                     name = name.replace(/[-_]?\d{2,4}x\d{2,4}$/, '');
                     return name;
                 } catch { return (u || '').toLowerCase(); }
             };
+            
             const bestByKey = new Map();
-            for (const r of resultsWithCategory) {
+            for (const r of categoryResults) {
                 const key = normalizeKey(r.imageUrl || r.url || '');
                 const cur = bestByKey.get(key);
                 const area = (Number(r.width || 0) * Number(r.height || 0)) || 0;
                 const curArea = cur ? ((Number(cur.width || 0) * Number(cur.height || 0)) || 0) : 0;
                 if (!cur || area > curArea) bestByKey.set(key, r);
             }
-            // replace array with best unique items
-            while (resultsWithCategory.length) resultsWithCategory.pop();
-            resultsWithCategory.push(...bestByKey.values());
+            
+            // Replace array with best unique items
+            while (categoryResults.length) categoryResults.pop();
+            categoryResults.push(...bestByKey.values());
 
-            // Drop any items without a direct image URL to avoid broken page links
-            for (let i = resultsWithCategory.length - 1; i >= 0; i--) {
-                if (!resultsWithCategory[i].imageUrl) resultsWithCategory.splice(i, 1);
+            // Drop any items without a direct image URL
+            for (let i = categoryResults.length - 1; i >= 0; i--) {
+                if (!categoryResults[i].imageUrl) categoryResults.splice(i, 1);
             }
 
-            // CONTENT-FIRST relevance filtering (phrases then terms) now that OG fields are available
-            const qNorm = query.toLowerCase();
-            const quoted = Array.from(qNorm.matchAll(/"([^"]+)"/g)).map(m => m[1]).filter(Boolean);
-            const knownPhrases = ['hot ones'];
-            const phrases = [...new Set([...quoted, ...knownPhrases.filter(p => qNorm.includes(p))])];
-            // parse entities around connectors: vs, x, and, &
-            const entityParts = qNorm.split(/\s+(?:vs|x|and|&|with)\s+/g).map(s => s.trim()).filter(Boolean);
-            const entities = entityParts.length > 1 ? entityParts : [];
-            let residual = qNorm;
-            phrases.forEach(p => { residual = residual.replace(p, ' '); });
-            residual = residual.replace(/\b(vs|x|and|&|with)\b/g, ' ');
-            const terms = residual.split(/\s+/).filter(Boolean);
-            const requireAll = settings?.searchConfig?.requireAllTerms === true;
-            const minMP = settings?.searchConfig?.minImageMegaPixels || 0;
+            // ENHANCED collaboration-aware relevance filtering
+            const collaboration = categoryResults[0]?._collaboration;
+            if (collaboration && collaboration.isCollaboration && collaboration.entities.length >= 2) {
+                console.log(`[BSearch] Applying collaboration filtering for:`, collaboration.entities);
+                
+                const entities = collaboration.entities.map(e => e.toLowerCase());
+                const requireAll = settings?.searchConfig?.requireAllTerms === true;
+                const minMP = settings?.searchConfig?.minImageMegaPixels || 0;
 
-            const contentMatches = (r, relaxedMin = null) => {
-                const hay = `${r.ogTitle || ''} ${r.ogDescription || ''} ${r.ogAlt || ''} ${r.title || ''} ${r.pageUrl || r.url || ''}`.toLowerCase();
-                // For multi-entity queries, require both entities or allow at least one strong match when relaxed
-                if (!phrases.every(p => hay.includes(p))) return false; // always require phrases
-                if (entities.length > 1) {
+                const collaborationMatches = (r, relaxedMin = null) => {
+                    const hay = `${r.ogTitle || ''} ${r.ogDescription || ''} ${r.ogAlt || ''} ${r.title || ''} ${r.pageUrl || r.url || ''}`.toLowerCase();
+                    
+                    // For collaborations, strongly prefer content that mentions ALL entities
                     const entityMatches = entities.filter(e => hay.includes(e)).length;
+                    
                     if (relaxedMin !== null) {
-                        if (entityMatches < 1) return false;
-                    } else if (entityMatches < 2) {
-                        return false;
+                        // Relaxed mode: at least one entity match
+                        return entityMatches >= Math.max(1, relaxedMin);
+                    } else {
+                        // Strict mode: prefer both entities, but allow single strong matches
+                        if (entityMatches >= 2) return true; // Perfect match
+                        if (entityMatches >= 1 && hay.includes('and')) return true; // Single entity + collaboration word
+                        if (entityMatches >= 1 && hay.includes('with')) return true; // Single entity + with
+                        return entityMatches >= 1; // Single entity as fallback
                     }
+                };
+
+                // Three-stage filtering: strict -> medium -> relaxed
+                let strictlyKept = [];
+                for (const r of categoryResults) {
+                    if (!collaborationMatches(r)) continue;
+                    const hasDims = Number(r.width) > 0 && Number(r.height) > 0;
+                    const mp = hasDims ? ((Number(r.width) * Number(r.height)) / 1_000_000) : 0;
+                    if (!hasDims || mp >= minMP) strictlyKept.push(r);
                 }
-                if (terms.length === 0) return true;
-                if (requireAll && relaxedMin === null) return terms.every(t => hay.includes(t));
-                const minMatches = relaxedMin ?? 1;
-                const matched = terms.filter(t => hay.includes(t)).length;
-                return matched >= minMatches;
-            };
+                
+                // If strict filtering yields too few results, try medium filtering
+                if (strictlyKept.length < 15) {
+                    console.log(`[BSearch] Strict collaboration filtering yielded ${strictlyKept.length}, trying medium`);
+                    const mediumKept = [];
+                    for (const r of categoryResults) {
+                        if (collaborationMatches(r, 1)) mediumKept.push(r);
+                    }
+                    strictlyKept = mediumKept.length > strictlyKept.length ? mediumKept : strictlyKept;
+                }
+                
+                // Final fallback: keep all if we have very few
+                const finalResults = strictlyKept.length >= 10 ? strictlyKept : categoryResults;
+                
+                while (categoryResults.length) categoryResults.pop();
+                categoryResults.push(...finalResults);
+                
+                console.log(`[BSearch] Collaboration filtering: ${finalResults.length} results after filtering`);
+            } else {
+                // Regular content filtering for non-collaboration queries
+                const qNorm = query.toLowerCase();
+                const quoted = Array.from(qNorm.matchAll(/"([^"]+)"/g)).map(m => m[1]).filter(Boolean);
+                const knownPhrases = ['hot ones'];
+                const phrases = [...new Set([...quoted, ...knownPhrases.filter(p => qNorm.includes(p))])];
+                const entityParts = qNorm.split(/\s+(?:vs|x|and|&|with)\s+/g).map(s => s.trim()).filter(Boolean);
+                const entities = entityParts.length > 1 ? entityParts : [];
+                let residual = qNorm;
+                phrases.forEach(p => { residual = residual.replace(p, ' '); });
+                residual = residual.replace(/\b(vs|x|and|&|with)\b/g, ' ');
+                const terms = residual.split(/\s+/).filter(Boolean);
+                const requireAll = settings?.searchConfig?.requireAllTerms === true;
+                const minMP = settings?.searchConfig?.minImageMegaPixels || 0;
 
-            // Two-stage: soft filter first to avoid zeroes, then hard filter if still big pool
-            let softKept = [];
-            for (const r of resultsWithCategory) {
-                if (contentMatches(r, entities.length > 1 ? 1 : 2)) softKept.push(r);
-            }
-            if (softKept.length === 0) softKept = resultsWithCategory; // fallback
-            const strictlyKept = [];
-            for (const r of softKept) {
-                if (!contentMatches(r)) continue;
-                const hasDims = Number(r.width) > 0 && Number(r.height) > 0;
-                const mp = hasDims ? ((Number(r.width) * Number(r.height)) / 1_000_000) : 0;
-                if (!hasDims || mp >= minMP) strictlyKept.push(r);
-            }
-            while (resultsWithCategory.length) resultsWithCategory.pop();
-            resultsWithCategory.push(...(strictlyKept.length ? strictlyKept : softKept));
+                const contentMatches = (r, relaxedMin = null) => {
+                    const hay = `${r.ogTitle || ''} ${r.ogDescription || ''} ${r.ogAlt || ''} ${r.title || ''} ${r.pageUrl || r.url || ''}`.toLowerCase();
+                    if (!phrases.every(p => hay.includes(p))) return false;
+                    if (entities.length > 1) {
+                        const entityMatches = entities.filter(e => hay.includes(e)).length;
+                        if (relaxedMin !== null) {
+                            if (entityMatches < 1) return false;
+                        } else if (entityMatches < 2) {
+                            return false;
+                        }
+                    }
+                    if (terms.length === 0) return true;
+                    if (requireAll && relaxedMin === null) return terms.every(t => hay.includes(t));
+                    const minMatches = relaxedMin ?? 1;
+                    const matched = terms.filter(t => hay.includes(t)).length;
+                    return matched >= minMatches;
+                };
 
-            // HEAD verification to enforce size/type and fix broken links (prefer direct images on same page)
-            const checks = await Promise.allSettled(resultsWithCategory.slice(0, 160).map(async r => {
+                let softKept = [];
+                for (const r of categoryResults) {
+                    if (contentMatches(r, entities.length > 1 ? 1 : 2)) softKept.push(r);
+                }
+                if (softKept.length === 0) softKept = categoryResults;
+                const strictlyKept = [];
+                for (const r of softKept) {
+                    if (!contentMatches(r)) continue;
+                    const hasDims = Number(r.width) > 0 && Number(r.height) > 0;
+                    const mp = hasDims ? ((Number(r.width) * Number(r.height)) / 1_000_000) : 0;
+                    if (!hasDims || mp >= minMP) strictlyKept.push(r);
+                }
+                while (categoryResults.length) categoryResults.pop();
+                categoryResults.push(...(strictlyKept.length ? strictlyKept : softKept));
+            }
+
+            // HEAD verification to enforce size/type and fix broken links
+            const checks = await Promise.allSettled(categoryResults.slice(0, 160).map(async r => {
                 const url = r.imageUrl || r.url;
-                // Trust common direct file URLs without HEAD to keep volume high
                 const isDirectFile = /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(url);
                 let info = { ok: isDirectFile, contentLength: null };
                 if (!isDirectFile) {
                     info = await headCheck(url);
                 }
                 if (!info.ok || (info.contentLength && info.contentLength < 150_000)) {
-                    // Try fallbacks from page candidates (og.images)
                     try {
                         const og = await fetchOpenGraphData(r.pageUrl || r.url);
                         const altImgs = (og && og.images) || [];
@@ -281,15 +439,15 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 const res = checks[i];
                 if (res.status === 'fulfilled') {
                     const info = res.value;
-                    if (!info.ok) { resultsWithCategory.splice(i, 1); continue; }
-                    if (info.contentLength && info.contentLength < 150_000) { resultsWithCategory.splice(i, 1); }
+                    if (!info.ok) { categoryResults.splice(i, 1); continue; }
+                    if (info.contentLength && info.contentLength < 150_000) { categoryResults.splice(i, 1); }
                 }
             }
         }
         
         // For articles without thumbnails, try to fetch Open Graph data
         if (category === 'articles') {
-            for (const result of resultsWithCategory) {
+            for (const result of categoryResults) {
                 if (!result.thumbnail) {
                     try {
                         const ogData = await fetchOpenGraphData(result.url);
@@ -304,19 +462,26 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             }
         }
         
-        const maxItems = 100; // allow larger pool before curation
-        allResults[category] = filterAndScoreResults(resultsWithCategory, maxItems);
+        const maxItems = 100;
+        allResults[category] = filterAndScoreResults(categoryResults, maxItems);
         console.log(`[BSearch] Top ${maxItems} results for ${category}:`, allResults[category].length);
     }
 
-    // If images volume is low, do a relaxed expansion pass to find "similar" results
+    // Enhanced volume expansion for collaboration searches
     if (categories.length === 1 && categories[0] === 'images') {
         const current = allResults.images || [];
         const MIN_TARGET = 25;
+        const collaboration = current[0]?._collaboration;
+        
         if (current.length < MIN_TARGET) {
             console.log('[BSearch] Images too few, running relaxed expansion pass');
-            const relaxedRaw = await searchCategory('images', query, apiKeys, searchConfig, offset, { pass: 'relaxed', minTermMatches: 2 });
-            const relaxedWithMeta = (relaxedRaw.items || relaxedRaw).map(r => ({ ...r, category: 'images', _query: query }));
+            const relaxedOptions = { 
+                pass: 'relaxed', 
+                minTermMatches: collaboration?.isCollaboration ? 1 : 2,
+                collaboration: collaboration
+            };
+            const relaxedRaw = await searchCategory('images', query, apiKeys, searchConfig, offset, relaxedOptions);
+            const relaxedWithMeta = (relaxedRaw.items || relaxedRaw).map(r => ({ ...r, category: 'images', _query: query, _collaboration: collaboration }));
             const merged = [...current];
             const seen = new Set(current.map(r => (r.imageUrl || r.url).toLowerCase()));
             for (const r of relaxedWithMeta) {
@@ -326,25 +491,29 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             allResults.images = filterAndScoreResults(merged, 60);
         }
 
-        // Final safety net: if still below target, pull from SerpApi (Google Images engine)
+        // Enhanced SerpApi supplement with collaboration context
         const afterRelax = allResults.images || [];
         if (afterRelax.length < MIN_TARGET && apiKeys?.serpApi && searchConfig?.usePaidImageAPIs !== false) {
             try {
                 console.log('[BSearch] Still low volume; fetching supplemental images from SerpApi');
-                const serp = await searchSerpApiImages(query, apiKeys.serpApi, 0, { exactPhrases: options?.exactPhrases, autoRelax: true, sortMode: options?.sortMode });
-                // pull additional pages if needed
+                const serpOptions = {
+                    exactPhrases: collaboration?.isCollaboration ? true : options?.exactPhrases,
+                    autoRelax: true,
+                    sortMode: options?.sortMode,
+                    collaboration: collaboration
+                };
+                const serp = await searchSerpApiImages(query, apiKeys.serpApi, 0, serpOptions);
                 let serpMore = [];
                 if (serp.length < 80) {
-                    const p2 = await searchSerpApiImages(query, apiKeys.serpApi, 100, { exactPhrases: options?.exactPhrases, autoRelax: true, sortMode: options?.sortMode });
+                    const p2 = await searchSerpApiImages(query, apiKeys.serpApi, 100, serpOptions);
                     serpMore.push(...p2);
                 }
                 if (serp.length + serpMore.length < 120) {
-                    const p3 = await searchSerpApiImages(query, apiKeys.serpApi, 200, { exactPhrases: options?.exactPhrases, autoRelax: true, sortMode: options?.sortMode });
+                    const p3 = await searchSerpApiImages(query, apiKeys.serpApi, 200, serpOptions);
                     serpMore.push(...p3);
                 }
-                const serpWithMeta = serp.map(r => ({ ...r, category: 'images', _query: query }));
-                const serpMoreWithMeta = serpMore.map(r => ({ ...r, category: 'images', _query: query }));
-                // Merge with existing and dedupe via curation layer
+                const serpWithMeta = serp.map(r => ({ ...r, category: 'images', _query: query, _collaboration: collaboration }));
+                const serpMoreWithMeta = serpMore.map(r => ({ ...r, category: 'images', _query: query, _collaboration: collaboration }));
                 const merged2 = [...afterRelax];
                 const seen2 = new Set(afterRelax.map(r => (r.imageUrl || r.url).toLowerCase()));
                 for (const r of serpWithMeta) {
@@ -362,29 +531,6 @@ export async function performSearch(query, categories, settings, offset = 0, opt
         }
     }
 
-    // Attach meta so UI can display total-valid counts
-    // Final HEAD validation across the curated image set to drop non-images/videos
-    if (allResults.images && allResults.images.length) {
-        const allowedExt = /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i;
-        const validated = [];
-        const candidates = allResults.images.slice(0, 60);
-        const headResults = await Promise.allSettled(candidates.map(async r => {
-            const url = r.imageUrl || r.url || '';
-            if (!/^https?:\/\//i.test(url)) return { ok: false };
-            if (!allowedExt.test(url)) {
-                // Still allow if HEAD says it's an image
-                const info = await headCheck(url);
-                return { ok: info.ok && (!info.contentLength || info.contentLength >= 200_000), info, r };
-            }
-            const info = await headCheck(url);
-            return { ok: info.ok && (!info.contentLength || info.contentLength >= 200_000), info, r };
-        }));
-        headResults.forEach(res => {
-            if (res.status === 'fulfilled' && res.value.ok) validated.push(res.value.r);
-        });
-        if (validated.length) allResults.images = validated;
-    }
-
     allResults.__meta = { totalValid: totalValidMeta };
     return allResults;
 }
@@ -395,10 +541,8 @@ export async function loadMoreResults(query, category, settings, offset, options
     const { apiKeys, searchConfig } = settings;
     const categoryResultsObj = await searchCategory(category, query, apiKeys, searchConfig, offset, options);
     const categoryResults = categoryResultsObj.items || categoryResultsObj;
-    // Add category and original query to each result for downstream scoring
-    const resultsWithCategory = categoryResults.map(result => ({ ...result, category, _query: query }));
     console.log(`[BSearch] LoadMore: got ${categoryResults.length} raw results for ${category}`);
-    const filteredResults = filterAndScoreResults(resultsWithCategory, 30); // Load more: up to 30 results
+    const filteredResults = filterAndScoreResults(categoryResults, 30);
     console.log(`[BSearch] LoadMore: filtered to ${filteredResults.length} results for ${category}`);
     return filteredResults;
 }
