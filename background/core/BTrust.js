@@ -1,86 +1,14 @@
 // background/core/BTrust.js
 
-// Sources to completely filter out
+// Remove all blocking - comment out or empty the blocked sources
 const BLOCKED_SOURCES = [
-    'facebook.com',
-    // 'instagram.com', // allowed per user request
-    'pinterest.com',
-    'tiktok.com',
-    'twitter.com',
-    'x.com',
-    'snapchat.com',
-    'linkedin.com',
-    'tumblr.com',
-    'reddit.com', 'redd.it',
-    'flickr.com',
-    'deviantart.com',
-    'behance.net',
-    '500px.com',
-    // Social/CDN platforms (hard blocked)
-    'youtube.com', 'youtu.be', 'ytimg.com',
-    'fbcdn.net', 'fbsbx.com',
-    // 'cdninstagram.com', // allowed per user request
-    'threads.net',
-    'tiktokcdn.com', 'ttwcdn.com',
-    'twimg.com', 't.co',
-    'imgur.com', 'giphy.com',
-    'vk.com', 'weibo.com', 'bilibili.com',
-    'unsplash.com',
-    'pexels.com',
-    'shutterstock.com',
-    'gettyimages.com',
-    'istockphoto.com',
-    'adobe.com',
-    'canva.com',
-    'medium.com',
-    'substack.com',
-    'quora.com',
-    // Allow major news portals back in for more volume
-    // 'yahoo.com',
-    // 'aol.com',
-    // 'msn.com',
-    'buzzfeed.com',
-    'vice.com',
-    'vox.com',
-    'huffpost.com',
-    'huffingtonpost.com',
-    'boredpanda.com',
-    'distractify.com',
-    'viralnova.com',
-    'upworthy.com',
-    'littlethings.com',
-    // 'wikipedia.org',
-    // 'en.wikipedia.org',
-    'wikimedia.org',
-    // Commerce/merch listing domains often off-topic for image news relevance
-    'lazada.vn', 'lazada.com', 'shopee', 'mercari', 'poshmark.com', 'ebay.com', 'amazon.com', 'shopify.com', 'merchbar.com', 'weverse.io', 'kpopmart', 'kpopstore',
-    // Shopping/retail (general)
-    'walmart.com', 'target.com', 'bestbuy.com', 'aliexpress.com', 'alibaba.com', 'etsy.com', 'redbubble.com', 'teepublic.com', 'zazzle.com', 'cafepress.com',
-    // Sneakers/athletics commerce & catalog/release calendars
-    'stockx.com', 'goat.com', 'flightclub.com', 'stadiumgoods.com', 'sneakersnstuff.com', 'footlocker.com', 'finishline.com', 'eastbay.com', 'champssports.com', 'hibbett.com', 'jdsports.com',
-    // Brand commerce
-    'nike.com', 'adidas.com', 'newbalance.com', 'reebok.com', 'puma.com',
-    // Sneaker news/release hubs (often product-forward)
-    'sneakernews.com', 'solecollector.com', 'nicekicks.com'
+    // Remove all entries - no blocking!
 ];
 
-// Domain-agnostic: avoid hardcoding preferred sources to keep general-purpose relevance
-
-// No social-specific allowlists; we rely on query-term coverage and size/quality signals
-
+// Simplify the blocking function to never block anything
 function isBlockedSource(sourceName, url) {
-    if (!sourceName && !url) return false;
-    
-    const sourceLower = sourceName ? sourceName.toLowerCase() : '';
-    const urlLower = url ? url.toLowerCase() : '';
-    // Parse hostname to catch commerce subdomains like store.*, shop.*, merch.*
-    let host = '';
-    try { host = new URL(url || '').hostname.toLowerCase(); } catch {}
-    const subdomainBlocked = host.startsWith('store.') || host.startsWith('shop.') || host.startsWith('merch.');
-    
-    return subdomainBlocked || BLOCKED_SOURCES.some(blocked => 
-        sourceLower.includes(blocked) || urlLower.includes(blocked) || host.includes(blocked)
-    );
+    // No blocking - always return false
+    return false;
 }
 
 function isEnglishContent(title, snippet) {
@@ -142,23 +70,18 @@ export function filterAndScoreResults(results, maxResults = 20) {
 
     console.log(`[BTrust] Processing ${results.length} results for curation`);
     
-    // Filter out blocked sources and non-English content
+    // Filter out only non-English content (no source blocking!)
     const filteredResults = results.filter(result => {
-        const blocked = isBlockedSource(result.source, result.url);
-    // Loosen language restriction when very few candidates pass
-    const english = isEnglishContent(result.title, result.snippet);
+        const english = isEnglishContent(result.title, result.snippet);
 
-        if (blocked) {
-            console.log(`[BTrust] Filtered out blocked source: "${result.source}" (${result.url})`);
-        }
         if (!english) {
             console.log(`[BTrust] Filtered out non-English content: "${result.title}"`);
         }
         
-        return !blocked && english && (result.imageUrl || /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || ''));
+        return english && (result.imageUrl || /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || ''));
     });
     
-    console.log(`[BTrust] After filtering blocked sources: ${filteredResults.length} results`);
+    console.log(`[BTrust] After filtering (English only): ${filteredResults.length} results`);
     
     let uniqueResults;
     if (filteredResults.length > 0 && filteredResults[0].category === 'images') {
@@ -184,82 +107,8 @@ export function filterAndScoreResults(results, maxResults = 20) {
         });
     }
     
-    // Ensure we have enough results by being less aggressive with filtering
-    if (uniqueResults.length < 25 && filteredResults.length > uniqueResults.length) {
-        console.log(`[BTrust] Only ${uniqueResults.length} unique results, adding more from filtered results`);
-        const additionalResults = [];
-        const byHost = new Map();
-        for (const r of filteredResults) {
-            const key = (r.imageUrl || r.url).toLowerCase().trim();
-            if (seenResults.has(key)) continue;
-            const host = (() => { try { return new URL(r.pageUrl || r.url || '').hostname; } catch { return 'unknown'; } })();
-            if (!byHost.has(host)) byHost.set(host, []);
-            byHost.get(host).push(r);
-        }
-        // Interleave by host for diversity
-        const hostKeys = Array.from(byHost.keys());
-        let pointer = 0;
-        while (additionalResults.length < Math.min(25 - uniqueResults.length, 50) && hostKeys.length > 0) {
-            const host = hostKeys[pointer % hostKeys.length];
-            const bucket = byHost.get(host);
-            const candidate = bucket && bucket.shift();
-            if (candidate) {
-                additionalResults.push(candidate);
-            } else {
-                hostKeys.splice(pointer % hostKeys.length, 1);
-                continue;
-            }
-            pointer++;
-        }
-        
-        additionalResults.forEach(result => {
-            const key = result.url.toLowerCase().trim();
-            seenResults.add(key);
-        });
-        
-        uniqueResults.push(...additionalResults);
-    }
-
-    // If still below target for images, relax de-duplication further: allow near-duplicates from different hosts/dimensions
-    if (uniqueResults.length < 25 && filteredResults.length > uniqueResults.length) {
-        console.log('[BTrust] Still below 25; relaxing duplicate policy to include variants');
-        const signatureCounts = new Map();
-        for (const r of uniqueResults) {
-            const sig = normalizeImageSignature(r.imageUrl || r.url || '', r.width, r.height);
-            signatureCounts.set(sig, (signatureCounts.get(sig) || 0) + 1);
-        }
-        for (const r of filteredResults) {
-            if (uniqueResults.length >= 25) break;
-            const key = (r.imageUrl || r.url).toLowerCase().trim();
-            if (seenResults.has(key)) continue;
-            const sig = normalizeImageSignature(r.imageUrl || r.url || '', r.width, r.height);
-            const host = (() => { try { return new URL(r.pageUrl || r.url || '').hostname; } catch { return 'unknown'; } })();
-            const existingIdx = uniqueResults.findIndex(x => normalizeImageSignature(x.imageUrl || x.url || '', x.width, x.height) === sig && (() => { try { return new URL(x.pageUrl || x.url || '').hostname; } catch { return 'unknown'; } })() === host);
-            if (existingIdx !== -1) continue; // skip exact same sig+host
-            // allow up to 2 variants per signature across different hosts
-            if ((signatureCounts.get(sig) || 0) >= 2) continue;
-            uniqueResults.push(r);
-            seenResults.add(key);
-            signatureCounts.set(sig, (signatureCounts.get(sig) || 0) + 1);
-        }
-    }
-    
     console.log(`[BTrust] After removing duplicates: ${uniqueResults.length} results`);
     
-    // If too few remain, append more from filtered pool (still English) to reach a minimum
-    const MIN_RETURN = 50;
-    if (uniqueResults.length < MIN_RETURN) {
-        const extra = filteredResults.filter(r => {
-            const key = (r.imageUrl || r.url).toLowerCase().trim();
-            return !seenResults.has(key);
-        });
-        for (const r of extra) {
-            seenResults.add((r.imageUrl || r.url).toLowerCase().trim());
-            uniqueResults.push(r);
-            if (uniqueResults.length >= MIN_RETURN) break;
-        }
-    }
-
     // Prefer high-resolution images and strong query coverage when category is images
     const withHiResBoost = uniqueResults.map(result => {
         let scoreBoost = 0;
@@ -307,11 +156,6 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return pb - pa;
     });
 
-    // If still short, pad with remaining English items up to maxResults
-    if (withHiResBoost.length < MIN_RETURN) {
-        const filler = filteredResults.filter(r => !withHiResBoost.find(x => (x.imageUrl||x.url) === (r.imageUrl||r.url)));
-        withHiResBoost.push(...filler.map(r => ({ ...r, curated: true, _hiresBoost: 0 })));
-    }
     return withHiResBoost.slice(0, maxResults);
 }
 
