@@ -1,8 +1,9 @@
-// results.js - Enhanced with performance optimizations (simplified version)
+// results.js - Enhanced with performance optimizations
+// Fallback implementations included for better compatibility
 
 document.addEventListener('DOMContentLoaded', function() {
     // Simple skeleton loader implementation
-    function showImageGridSkeleton(container, count = 9) {
+    function showImageGridSkeleton(container, count = 9, columns = 3) {
         if (!container) return;
         
         container.innerHTML = '';
@@ -26,6 +27,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function createImageElement(src, alt = '', options = {}) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = alt;
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.referrerPolicy = 'no-referrer';
+        
+        if (options.className) {
+            img.className = options.className;
+        }
+        
+        return img;
+    }
+
     function preloadCriticalImages(urls) {
         urls.slice(0, 6).forEach(url => {
             if (url) {
@@ -37,7 +53,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-
     const urlParams = new URLSearchParams(window.location.search);
     const query = urlParams.get('q');
     const initialMode = urlParams.get('mode');
@@ -54,8 +69,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchBtn = document.getElementById('searchBtn');
     const loadingDiv = document.querySelector('.loading');
     const timerEl = document.getElementById('timer');
+    const queryTitle = document.getElementById('queryTitle');
 
-    // Performance optimization: Basic state management
+    // Performance optimization: Basic state management without virtual scrolling
     let allResults = [];
     let isLoading = false;
     let hasMoreResults = true;
@@ -89,6 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             sessionStorage.setItem(`hirezzie_offset_${category}`, offset.toString());
         } catch {
+            // Handle storage quota exceeded
             console.warn('[Results] SessionStorage quota exceeded');
         }
     };
@@ -117,30 +134,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function getSortMode() {
         const toggle = document.getElementById('sortToggle');
         return (toggle && toggle.checked) ? 'relevant' : 'recent';
-    }
-
-    // Utility functions for performance optimization
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
-    function throttle(func, limit) {
-        let inThrottle;
-        return function(...args) {
-            if (!inThrottle) {
-                func.apply(this, args);
-                inThrottle = true;
-                setTimeout(() => inThrottle = false, limit);
-            }
-        };
     }
 
     // Initialize toggle from URL mode, with better error handling
@@ -263,6 +256,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // Utility functions for performance optimization
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    function throttle(func, limit) {
+        let inThrottle;
+        return function(...args) {
+            if (!inThrottle) {
+                func.apply(this, args);
+                inThrottle = true;
+                setTimeout(() => inThrottle = false, limit);
+            }
+        };
+    }
+
     // Enhanced image URL picking with better validation
     const pickDirectImageUrl = (r) => {
         const img = r?.imageUrl || null;
@@ -285,7 +302,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // Enhanced image card rendering with performance optimizations
-    const renderImageCard = (result) => {
+    const renderImageCard = (result, useVirtualScrolling = false) => {
         if (!result) return null;
         
         const directUrl = pickDirectImageUrl(result);
@@ -293,22 +310,48 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const card = document.createElement('div');
         card.className = 'image-card';
-        card.dataset.imageUrl = directUrl;
+        card.dataset.imageUrl = directUrl; // For virtual scrolling
 
         const imageHref = directUrl;
         const pageHref = result.contextLink || result.pageUrl || result.link || result.sourceUrl || imageHref;
         const sourceText = result.source || '';
         const altText = result.title || result.ogTitle || sourceText;
 
-        card.innerHTML = `
-            <a class="image-link" href="${imageHref}" target="_blank" rel="noopener noreferrer">
-                <img class="image-thumb loading" src="${directUrl}" alt="${altText}" loading="lazy" decoding="async" referrerpolicy="no-referrer">
-            </a>
-            <div class="image-credit">
+        if (useVirtualScrolling) {
+            // Simplified structure for virtual scrolling
+            const img = createImageElement(directUrl, altText, {
+                className: 'image-thumb loading',
+                lazy: true
+            });
+            
+            const imageLink = document.createElement('a');
+            imageLink.className = 'image-link';
+            imageLink.href = imageHref;
+            imageLink.target = '_blank';
+            imageLink.rel = 'noopener noreferrer';
+            imageLink.appendChild(img);
+
+            const credit = document.createElement('div');
+            credit.className = 'image-credit';
+            credit.innerHTML = `
                 <a href="${pageHref}" target="_blank" rel="noopener noreferrer">${sourceText}</a> · 
                 <a href="${imageHref}" target="_blank" rel="noopener noreferrer">Open image</a>
-            </div>
-        `;
+            `;
+
+            card.appendChild(imageLink);
+            card.appendChild(credit);
+        } else {
+            // Traditional rendering
+            card.innerHTML = `
+                <a class="image-link" href="${imageHref}" target="_blank" rel="noopener noreferrer">
+                    <img class="image-thumb loading" src="${directUrl}" alt="${altText}" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                </a>
+                <div class="image-credit">
+                    <a href="${pageHref}" target="_blank" rel="noopener noreferrer">${sourceText}</a> · 
+                    <a href="${imageHref}" target="_blank" rel="noopener noreferrer">Open image</a>
+                </div>
+            `;
+        }
 
         // Enhanced image loading with performance tracking
         const img = card.querySelector('.image-thumb');
@@ -345,10 +388,54 @@ document.addEventListener('DOMContentLoaded', function() {
         return card;
     };
 
-    // Enhanced image rendering with performance optimizations
-    const renderImagesIntoGrid = (results) => {
+    // Initialize virtual scrolling
+    function initializeVirtualScrolling() {
+        if (!resultsGrid) return;
+
+        virtualGrid = createResponsiveImageGrid(resultsGrid, [], {
+            rowHeight: 250,
+            gap: 16,
+            columns: 3,
+            loadMoreThreshold: 0.8,
+            onLoadMore: () => {
+                if (!isLoading && hasMoreResults) {
+                    loadMoreResults();
+                }
+            },
+            onItemRender: (element, item, index) => {
+                // Clear existing content
+                element.innerHTML = '';
+                element.className = 'image-card-container';
+                
+                const card = renderImageCard(item, true);
+                if (card) {
+                    element.appendChild(card);
+                }
+            },
+            onItemVisible: (item, index) => {
+                trackPerformance('item_visible', { index, url: item.imageUrl });
+            }
+        });
+
+        return virtualGrid;
+    }
+
+
+    // Enhanced image rendering with virtual scrolling support
+    const renderImagesIntoGrid = (results, useVirtualScrolling = false) => {
         if (!results || !Array.isArray(results)) return;
 
+        if (useVirtualScrolling && virtualGrid) {
+            // Add results to virtual grid
+            allResults.push(...results);
+            virtualGrid.addItems(results);
+            
+            // Update counters
+            if (resultsCuratedEl) resultsCuratedEl.textContent = String(allResults.length);
+            return;
+        }
+
+        // Traditional grid rendering (fallback)
         const hadAny = resultsGrid.querySelectorAll('.image-card').length > 0;
         
         if (results.length > 0) {
@@ -366,7 +453,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         fragment.appendChild(node);
                         appended++;
                         seen.add(href);
-                        allResults.push(result);
                     }
                 }
             });
@@ -385,6 +471,60 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // Enhanced load more functionality with better error handling
+    async function loadMoreResults() {
+        if (isLoading || !hasMoreResults) return;
+        
+        isLoading = true;
+        currentOffset += 50; // Increment offset
+        
+        trackPerformance('load_more_started', { offset: currentOffset });
+        
+        try {
+            const response = await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Load more timeout')), 15000);
+                
+                chrome.runtime.sendMessage({
+                    action: 'load_more',
+                    category: 'images',
+                    query,
+                    offset: currentOffset,
+                    options: { sortMode: getSortMode() }
+                }, (response) => {
+                    clearTimeout(timeout);
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else {
+                        resolve(response);
+                    }
+                });
+            });
+            
+            const newResults = (response && response.data) || [];
+            
+            if (Array.isArray(newResults) && newResults.length > 0) {
+                renderImagesIntoGrid(newResults, !!virtualGrid);
+                trackPerformance('load_more_success', { 
+                    offset: currentOffset, 
+                    resultCount: newResults.length 
+                });
+            } else {
+                hasMoreResults = false;
+                trackPerformance('load_more_exhausted', { offset: currentOffset });
+            }
+            
+        } catch (error) {
+            console.error('[Results] Load more failed:', error);
+            hasMoreResults = false;
+            trackPerformance('load_more_error', { 
+                offset: currentOffset, 
+                error: error.message 
+            });
+        } finally {
+            isLoading = false;
+        }
+    }
+
     // Enhanced main search function with comprehensive optimizations
     async function runSearch(q) {
         const useQuery = q || query;
@@ -402,13 +542,29 @@ document.addEventListener('DOMContentLoaded', function() {
         showLoading(true);
         trackPerformance('search_started', { query: useQuery.substring(0, 50) });
 
+        // Decide whether to use virtual scrolling based on viewport and capabilities
+        const useVirtualScrolling = window.innerWidth >= 1200 && 
+                                  'IntersectionObserver' in window &&
+                                  'requestAnimationFrame' in window;
+
+        if (useVirtualScrolling && !virtualGrid) {
+            virtualGrid = initializeVirtualScrolling();
+        }
+
         // Clear existing content
-        resultsGrid.innerHTML = '';
+        if (virtualGrid) {
+            virtualGrid.setItems([]);
+        } else {
+            resultsGrid.innerHTML = '';
+        }
+        
         if (resultsCuratedEl) resultsCuratedEl.textContent = '0';
         if (resultsTotalEl) resultsTotalEl.textContent = '0';
 
         // Show skeleton loading
-        showImageGridSkeleton(resultsGrid, 9);
+        if (!useVirtualScrolling) {
+            showImageGridSkeleton(resultsGrid, 9, getResponsiveColumns());
+        }
 
         try {
             const modeParam = new URLSearchParams(window.location.search).get('mode') || getSortMode();
@@ -445,9 +601,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const criticalImages = imageResults.slice(0, 6).map(r => pickDirectImageUrl(r)).filter(Boolean);
                     preloadCriticalImages(criticalImages);
                     
-                    renderImagesIntoGrid(imageResults);
+                    renderImagesIntoGrid(imageResults, useVirtualScrolling);
                     
-                    // Progressive background loading
+                    // Progressive background loading with controlled concurrency
                     startProgressiveLoading(useQuery);
                 } else {
                     resultsRoot.innerHTML = '<p class="no-results">No images found. Try a different search term.</p>';
@@ -455,6 +611,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 trackPerformance('search_success', {
                     resultCount: imageResults.length,
+                    useVirtualScrolling,
                     fromCache: response.fromCache || false
                 });
             } else {
@@ -477,26 +634,47 @@ document.addEventListener('DOMContentLoaded', function() {
         const targetCount = 50;
         const offsets = [50, 100, 150, 200, 250, 300];
         let index = 0;
+        const maxConcurrent = 2;
+        let activeCalls = 0;
 
-        const pump = () => {
-            const current = allResults.length || resultsGrid.querySelectorAll('.image-card').length;
-            if (current >= targetCount || index >= offsets.length) return;
+        const pump = async () => {
+            if (activeCalls >= maxConcurrent) return;
             
-            chrome.runtime.sendMessage({ 
-                action: 'load_more', 
-                category: 'images', 
-                query: useQuery, 
-                offset: offsets[index++] 
-            }, (more) => {
-                const arr = (more && more.data) || [];
-                if (Array.isArray(arr) && arr.length) {
-                    renderImagesIntoGrid(arr);
+            const current = allResults.length || resultsGrid.querySelectorAll('.image-card').length;
+            if (current >= targetCount || index >= offsets.length) {
+                return;
+            }
+
+            activeCalls++;
+            const offset = offsets[index++];
+            
+            try {
+                await loadMoreResults();
+            } catch (error) {
+                console.warn(`[Results] Progressive loading failed at offset ${offset}:`, error);
+            } finally {
+                activeCalls--;
+                
+                // Continue loading if needed
+                if (hasMoreResults && activeCalls < maxConcurrent) {
+                    setTimeout(pump, 100); // Small delay between requests
                 }
-                pump();
-            });
+            }
         };
 
+        // Start initial concurrent requests
         pump();
+        if (hasMoreResults) {
+            setTimeout(pump, 50);
+        }
+    }
+
+    // Responsive column calculation
+    function getResponsiveColumns() {
+        const width = window.innerWidth;
+        if (width < 768) return 1;
+        if (width < 1200) return 2;
+        return 3;
     }
 
     // Keyboard shortcuts for better UX
@@ -515,6 +693,15 @@ document.addEventListener('DOMContentLoaded', function() {
             searchInput.blur();
         }
     });
+
+    // Handle window resize for responsive grid
+    const handleResize = throttle(() => {
+        if (virtualGrid) {
+            virtualGrid.refresh();
+        }
+    }, 250);
+
+    window.addEventListener('resize', handleResize);
 
     // Start the search when ready
     if (query) {
