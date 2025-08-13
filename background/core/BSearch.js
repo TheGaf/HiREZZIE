@@ -20,6 +20,100 @@ function resetSeenResults() {
     console.log('[BSearch] Reset seen results cache');
 }
 
+// Enhanced source analysis for debugging search bias
+function analyzeSourceResults(query, sourceResults) {
+    const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    console.log(`[BSearch] === SOURCE ANALYSIS for query "${query}" ===`);
+    console.log(`[BSearch] Search terms: [${searchTerms.join(', ')}]`);
+    
+    const sourceStats = {};
+    let totalResults = 0;
+    
+    // Analyze each source
+    for (const [sourceName, results] of Object.entries(sourceResults)) {
+        if (results.length === 0) continue;
+        
+        sourceStats[sourceName] = {
+            total: results.length,
+            termCounts: {}
+        };
+        
+        // Initialize term counts
+        for (const term of searchTerms) {
+            sourceStats[sourceName].termCounts[term] = 0;
+        }
+        
+        // Count term occurrences in each result
+        for (const result of results) {
+            const haystack = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
+            
+            for (const term of searchTerms) {
+                if (haystack.includes(term)) {
+                    sourceStats[sourceName].termCounts[term]++;
+                }
+            }
+        }
+        
+        totalResults += results.length;
+    }
+    
+    // Log detailed source breakdown
+    console.log('[BSearch] Source Breakdown:');
+    for (const [sourceName, stats] of Object.entries(sourceStats)) {
+        const termBreakdown = searchTerms.map(term => `${stats.termCounts[term]} ${term}`).join(', ');
+        console.log(`[BSearch]   ${sourceName.toUpperCase()}: ${stats.total} results (${termBreakdown})`);
+    }
+    
+    // Term distribution analysis
+    console.log('[BSearch] Term Distribution Analysis:');
+    for (const term of searchTerms) {
+        const termTotal = Object.values(sourceStats).reduce((sum, stats) => sum + stats.termCounts[term], 0);
+        console.log(`[BSearch]   "${term}": ${termTotal} total matches`);
+        
+        for (const [sourceName, stats] of Object.entries(sourceStats)) {
+            const count = stats.termCounts[term];
+            const percentage = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
+            console.log(`[BSearch]     ${sourceName}: ${count}/${stats.total} (${percentage}%)`);
+        }
+    }
+    
+    // Identify potential bias
+    console.log('[BSearch] Bias Detection:');
+    if (searchTerms.length >= 2) {
+        const [term1, term2] = searchTerms;
+        let term1Total = 0, term2Total = 0;
+        
+        for (const stats of Object.values(sourceStats)) {
+            term1Total += stats.termCounts[term1] || 0;
+            term2Total += stats.termCounts[term2] || 0;
+        }
+        
+        const ratio = term2Total > 0 ? (term1Total / term2Total) : (term1Total > 0 ? 'Infinity' : 'N/A');
+        console.log(`[BSearch]   ${term1}:${term2} ratio = ${ratio}`);
+        
+        if (typeof ratio === 'number' && (ratio > 3 || ratio < 0.33)) {
+            console.log(`[BSearch]   ⚠️  BIAS DETECTED: Significant imbalance between "${term1}" and "${term2}"`);
+            
+            // Identify which sources are most biased
+            for (const [sourceName, stats] of Object.entries(sourceStats)) {
+                const s1 = stats.termCounts[term1] || 0;
+                const s2 = stats.termCounts[term2] || 0;
+                const sourceRatio = s2 > 0 ? (s1 / s2) : (s1 > 0 ? 'Infinity' : 'N/A');
+                
+                if (typeof sourceRatio === 'number' && (sourceRatio > 5 || sourceRatio < 0.2)) {
+                    console.log(`[BSearch]     ${sourceName}: HEAVILY BIASED (${s1}:${s2} = ${sourceRatio})`);
+                } else if (typeof sourceRatio === 'string') {
+                    console.log(`[BSearch]     ${sourceName}: COMPLETE BIAS (${s1}:${s2})`);
+                }
+            }
+        } else {
+            console.log(`[BSearch]   ✅ Good balance between search terms`);
+        }
+    }
+    
+    console.log(`[BSearch] === END SOURCE ANALYSIS (${totalResults} total results) ===`);
+}
+
 // Rate limiting for OG requests
 const ogRequestQueue = [];
 let ogProcessing = false;
@@ -157,7 +251,7 @@ function relevanceFirstFilter(results, maxResults = 50) {
                 score += titleMatches * 15;
             }
             
-            console.log(`[BSearch] "${result.title}" RELEVANCE SCORE: ${score} (${termMatches}/${searchTerms.length} terms matched)`);
+            console.log(`[BSearch] "${result.title}" RELEVANCE SCORE: ${score} (${termMatches}/${searchTerms.length} terms matched) [${result._sourceType || 'unknown'}]`);
         } else {
             console.log(`[BSearch] "${result.title}" NO MATCHES - RELEVANCE SCORE: 0`);
         }
@@ -192,7 +286,7 @@ function relevanceFirstFilter(results, maxResults = 50) {
         const w = result.width || 0;
         const h = result.height || 0;
         const mp = Math.round((w * h) / 1000000);
-        console.log(`[BSearch] #${i+1}: "${result.title}" (SCORE: ${result._score}, ${w}x${h} ${mp}MP) from ${result.source}`);
+        console.log(`[BSearch] #${i+1}: "${result.title}" (SCORE: ${result._score}, ${w}x${h} ${mp}MP) from ${result.source} [${result._sourceType || 'unknown'}]`);
     });
     
     return final;
@@ -200,30 +294,65 @@ function relevanceFirstFilter(results, maxResults = 50) {
 
 async function searchCategory(category, query, apiKeys, searchConfig, offset = 0, options = {}) {
     console.log(`[BSearch] Searching category: ${category} for query: "${query}" with offset: ${offset}`);
+    
+    // Source tracking for debugging
+    const sourceResults = {
+        'bing': [],
+        'google': [],
+        'serpapi': [],
+        'brave': [],
+        'gnews': [],
+        'newsapi': []
+    };
+    
     let promises = [];
     
     switch (category) {
         case 'articles':
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 7));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7));
-            promises.push(searchBrave(query, apiKeys.brave, offset));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 7).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'gnews' }));
+                sourceResults['gnews'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'newsapi' }));
+                sourceResults['newsapi'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchBrave(query, apiKeys.brave, offset).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'brave' }));
+                sourceResults['brave'].push(...tagged);
+                return tagged;
+            }));
             break;
             
         case 'images':
-            // Free sources first
-            promises.push(searchBraveImages(query, apiKeys.brave, offset));
+            // Free sources first - Brave
+            promises.push(searchBraveImages(query, apiKeys.brave, offset).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'brave' }));
+                sourceResults['brave'].push(...tagged);
+                return tagged;
+            }));
             
             // MASSIVE Bing coverage - up to 800 results
             const bingOffsets = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750];
             for (const off of bingOffsets) {
-                promises.push(searchBingImages(query, off, options));
+                promises.push(searchBingImages(query, off, options).then(results => {
+                    const tagged = results.map(r => ({ ...r, _sourceType: 'bing' }));
+                    sourceResults['bing'].push(...tagged);
+                    return tagged;
+                }));
             }
             
             // Google CSE if available - multiple pages
             if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
                 const googleOffsets = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
                 for (const off of googleOffsets) {
-                    promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, off, options));
+                    promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, off, options).then(results => {
+                        const tagged = results.map(r => ({ ...r, _sourceType: 'google' }));
+                        sourceResults['google'].push(...tagged);
+                        return tagged;
+                    }));
                 }
             }
             
@@ -231,7 +360,11 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             if (apiKeys?.serpApi) {
                 const serpOffsets = [0, 100, 200, 300, 400];
                 for (const off of serpOffsets) {
-                    promises.push(searchSerpApiImages(query, apiKeys.serpApi, off, options).catch(e => {
+                    promises.push(searchSerpApiImages(query, apiKeys.serpApi, off, options).then(results => {
+                        const tagged = results.map(r => ({ ...r, _sourceType: 'serpapi' }));
+                        sourceResults['serpapi'].push(...tagged);
+                        return tagged;
+                    }).catch(e => {
                         console.warn(`[BSearch] SerpApi failed at offset ${off}:`, e.message);
                         return [];
                     }));
@@ -239,22 +372,53 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             }
             
             // Get images from news articles too
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 7));
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 90));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30));
-            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 90));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 7).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'gnews' }));
+                sourceResults['gnews'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 30).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'gnews' }));
+                sourceResults['gnews'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 90).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'gnews' }));
+                sourceResults['gnews'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'newsapi' }));
+                sourceResults['newsapi'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'newsapi' }));
+                sourceResults['newsapi'].push(...tagged);
+                return tagged;
+            }));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 90).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'newsapi' }));
+                sourceResults['newsapi'].push(...tagged);
+                return tagged;
+            }));
             
-            // Multiple Brave offsets
+            // Multiple Brave offsets for images
             const braveOffsets = [0, 10, 20, 30, 40];
             for (const off of braveOffsets) {
-                promises.push(searchBraveImages(query, apiKeys.brave, off));
+                promises.push(searchBraveImages(query, apiKeys.brave, off).then(results => {
+                    const tagged = results.map(r => ({ ...r, _sourceType: 'brave' }));
+                    sourceResults['brave'].push(...tagged);
+                    return tagged;
+                }));
             }
             break;
             
         case 'videos':
-            promises.push(searchYouTube(query, apiKeys.youtube, offset));
+            promises.push(searchYouTube(query, apiKeys.youtube, offset).then(results => {
+                const tagged = results.map(r => ({ ...r, _sourceType: 'youtube' }));
+                return tagged;
+            }));
             break;
     }
 
@@ -267,6 +431,12 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
         .flatMap(res => res.value);
     
     console.log(`[BSearch] Got ${validResults.length} raw results for ${category}`);
+    
+    // Enhanced per-source debugging for images
+    if (category === 'images') {
+        analyzeSourceResults(query, sourceResults);
+    }
+    
     return validResults;
 }
 
