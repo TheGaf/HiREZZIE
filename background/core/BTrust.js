@@ -207,6 +207,8 @@ export function filterAndScoreResults(results, maxResults = 20) {
     // Prefer high-resolution images and strong query coverage when category is images
     const withHiResBoost = uniqueResults.map(result => {
         let scoreBoost = 0;
+        let contextAnalysis = { hasContext: false, primaryContext: null, primaryScore: 0 }; // Default
+        
         if (result.category === 'images') {
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
@@ -249,7 +251,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
             
             // Analyze celebrity context for disambiguation
-            const contextAnalysis = analyzeCelebrityContext(query, hay);
+            contextAnalysis = analyzeCelebrityContext(query, hay);
             
             if (entities.length > 1) {
                 // For multi-entity queries, check how many words from each entity appear
@@ -352,7 +354,8 @@ export function filterAndScoreResults(results, maxResults = 20) {
             ...result, 
             curated: true,
             curationMessage: "I personally curated this from the best sources available",
-            _hiresBoost: scoreBoost
+            _hiresBoost: scoreBoost,
+            _contextAnalysis: contextAnalysis
         };
         console.log(`[BTrust] Curated result: "${result.title}" from "${result.source}"`);
         return curatedResult;
