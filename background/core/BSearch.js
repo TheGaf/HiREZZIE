@@ -3,7 +3,6 @@ import { filterAndScoreResults, resetDuplicateCache } from './BTrust.js';
 import { fetchOpenGraphData, headCheck } from '../utils/BUtils.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchGoogleImages } from '../api/googleImages.js';
-import { searchBrave } from '../api/brave.js';
 import { searchBraveImages } from '../api/brave.js';
 import { searchBingImages } from '../api/bing.js';
 
