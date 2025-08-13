@@ -1,21 +1,5 @@
-// Simple background service worker for hiREZZIE
-
-// API Configuration - replace with your actual key values
-const API_CONFIG = {
-  google: {
-    apiKey: 'YOUR_GOOGLEIMAGES_KEY_VALUE_HERE',  // Your GOOGLEIMAGES_KEY value
-    searchEngineId: 'YOUR_GOOGLE_SEARCH_KEY_VALUE_HERE'  // Your GOOGLE_SEARCH_KEY value
-  },
-  brave: {
-    apiKey: 'YOUR_BRAVE_KEY_VALUE_HERE'  // Your BRAVE_KEY value
-  },
-  serpapi: {
-    apiKey: 'YOUR_SERPAPI_KEY_VALUE_HERE'  // Your SERPAPI_KEY value
-  },
-  newsapi: {
-    apiKey: 'YOUR_GNEWS_KEY_VALUE_HERE'  // Your GNEWS_KEY value
-  }
-};
+// Load configuration
+importScripts('config.js');
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'searchImages') {
@@ -38,7 +22,7 @@ async function searchImages(query) {
   try {
     console.log(`Searching for: ${query}`);
     
-    // Try multiple sources in parallel - real web sources only
+    // Try multiple sources in parallel
     const searches = [
       searchSerpApiImages(query),
       searchBraveImages(query),
@@ -83,7 +67,6 @@ async function searchImages(query) {
 
 async function searchYahooImages(query) {
   try {
-    // Yahoo Images search via web scraping
     const url = `https://images.search.yahoo.com/search/images?p=${encodeURIComponent(query)}&imgsz=large`;
     
     const response = await fetch(url, {
@@ -130,7 +113,7 @@ async function searchSerpApiImages(query) {
   try {
     const apiKey = API_CONFIG.serpapi.apiKey;
     
-    if (!apiKey || apiKey.startsWith('YOUR_')) {
+    if (!apiKey) {
       console.log('SerpApi key not configured');
       return [];
     }
@@ -163,7 +146,7 @@ async function searchBraveImages(query) {
   try {
     const apiKey = API_CONFIG.brave.apiKey;
     
-    if (!apiKey || apiKey.startsWith('YOUR_')) {
+    if (!apiKey) {
       console.log('Brave API key not configured');
       return [];
     }
@@ -204,7 +187,7 @@ async function searchGoogleImages(query) {
     const apiKey = API_CONFIG.google.apiKey;
     const searchEngineId = API_CONFIG.google.searchEngineId;
     
-    if (!apiKey || apiKey.startsWith('YOUR_')) {
+    if (!apiKey || !searchEngineId) {
       console.log('Google API key not configured');
       return [];
     }
