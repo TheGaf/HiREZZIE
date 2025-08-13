@@ -87,6 +87,28 @@ const CELEBRITY_DATABASE = {
             'fearless', 'speak now', 'red', '1989', 'swiftie'
         ],
         type: 'actor'
+    },
+    'ariana grande': {
+        aliases: ['ariana grande', 'ariana grande-butera'],
+        contextKeywords: [
+            'singer', 'songwriter', 'musician', 'pop star', 'vocalist',
+            'thank u next', 'positions', 'dangerous woman', 'sweetener',
+            'my everything', 'yours truly', 'grammy', 'nickelodeon',
+            'victorious', 'sam and cat', 'ponytail', 'high notes'
+        ],
+        exclusionTerms: [],
+        type: 'musician'
+    },
+    'billie eilish': {
+        aliases: ['billie eilish', 'billie eilish o\'connell'],
+        contextKeywords: [
+            'singer', 'songwriter', 'musician', 'artist', 'pop',
+            'bad guy', 'when the party\'s over', 'lovely', 'ocean eyes',
+            'happier than ever', 'dont smile at me', 'grammy', 'alternative',
+            'green hair', 'oversized clothes', 'young artist'
+        ],
+        exclusionTerms: [],
+        type: 'musician'
     }
 };
 
@@ -204,11 +226,11 @@ export function filterCelebrityResults(results, detectedCelebrities, options = {
             const analysis = scoreCelebrityMatch(result, celebrity.data);
             celebrityAnalysis[celebrity.name] = analysis;
             
-            // If this is definitely the wrong celebrity, mark for exclusion
-            if (analysis.isDefinitelyWrong) {
+            // Only exclude if this is STRONGLY the wrong celebrity (score < -3 and has negative matches)
+            if (analysis.score < -3 && analysis.negativeMatches.length > 0) {
                 shouldExclude = true;
                 console.log(`[BCelebrity] Excluding result with wrong celebrity indicators for ${celebrity.name}:`, 
-                           analysis.negativeMatches);
+                           analysis.negativeMatches, `(score: ${analysis.score})`);
             }
             
             // Add to total score (can be negative)
