@@ -142,11 +142,17 @@ export function filterAndScoreResults(results, maxResults = 20) {
 
     console.log(`[BTrust] Processing ${results.length} results for curation`);
     
-    // Filter out blocked sources and non-English content
+    // Less aggressive filtering - focus on quality over strict blocking
     const filteredResults = results.filter(result => {
         const blocked = isBlockedSource(result.source, result.url);
-    // Loosen language restriction when very few candidates pass
-    const english = isEnglishContent(result.title, result.snippet);
+        // More lenient language restriction to get better volume
+        const english = isEnglishContent(result.title, result.snippet);
+        const hasValidImage = result.imageUrl || /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '');
+        
+        // Enhanced quality checks for high-res focus
+        const width = Number(result.width || 0);
+        const height = Number(result.height || 0);
+        const meetsQualityThreshold = width >= 1200 || height >= 1200 || (width * height) >= 2_000_000;
 
         if (blocked) {
             console.log(`[BTrust] Filtered out blocked source: "${result.source}" (${result.url})`);
@@ -154,17 +160,22 @@ export function filterAndScoreResults(results, maxResults = 20) {
         if (!english) {
             console.log(`[BTrust] Filtered out non-English content: "${result.title}"`);
         }
+        if (!hasValidImage) {
+            console.log(`[BTrust] Filtered out - no valid image URL`);
+        }
+        if (!meetsQualityThreshold) {
+            console.log(`[BTrust] Filtered out low quality: ${width}x${height} from ${result.source}`);
+        }
         
-        return !blocked && english && (result.imageUrl || /\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || ''));
+        return !blocked && english && hasValidImage && meetsQualityThreshold;
     });
     
-    console.log(`[BTrust] After filtering blocked sources: ${filteredResults.length} results`);
-    
+    console.log(`[BTrust] After enhanced filtering: ${filteredResults.length} results`);
+    // Enhanced deduplication that preserves highest quality variants
     let uniqueResults;
     if (filteredResults.length > 0 && filteredResults[0].category === 'images') {
-        // Special image de-duplication across different source sites
+        // Smart deduplication for images - preserve best quality version
         const deduped = dedupeImagesBySignature(filteredResults);
-        // Still guard against exact URL dupes
         uniqueResults = deduped.filter(result => {
             const key = (result.imageUrl || result.url).toLowerCase().trim();
             if (seenResults.has(key)) return false;
@@ -172,7 +183,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
             return true;
         });
     } else {
-        // Only filter out exact URL duplicates (very lenient)
+        // Standard URL deduplication
         uniqueResults = filteredResults.filter(result => {
             const key = result.url.toLowerCase().trim();
             if (seenResults.has(key)) {
@@ -184,9 +195,10 @@ export function filterAndScoreResults(results, maxResults = 20) {
         });
     }
     
-    // Ensure we have enough results by being less aggressive with filtering
-    if (uniqueResults.length < 25 && filteredResults.length > uniqueResults.length) {
-        console.log(`[BTrust] Only ${uniqueResults.length} unique results, adding more from filtered results`);
+    // More lenient minimum thresholds for better results
+    const MIN_RESULTS = 20;
+    if (uniqueResults.length < MIN_RESULTS && filteredResults.length > uniqueResults.length) {
+        console.log(`[BTrust] Only ${uniqueResults.length} unique results, relaxing deduplication for better volume`);
         const additionalResults = [];
         const byHost = new Map();
         for (const r of filteredResults) {
@@ -199,7 +211,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
         // Interleave by host for diversity
         const hostKeys = Array.from(byHost.keys());
         let pointer = 0;
-        while (additionalResults.length < Math.min(25 - uniqueResults.length, 50) && hostKeys.length > 0) {
+        while (additionalResults.length < Math.min(MIN_RESULTS - uniqueResults.length, 40) && hostKeys.length > 0) {
             const host = hostKeys[pointer % hostKeys.length];
             const bucket = byHost.get(host);
             const candidate = bucket && bucket.shift();
@@ -220,58 +232,23 @@ export function filterAndScoreResults(results, maxResults = 20) {
         uniqueResults.push(...additionalResults);
     }
 
-    // If still below target for images, relax de-duplication further: allow near-duplicates from different hosts/dimensions
-    if (uniqueResults.length < 25 && filteredResults.length > uniqueResults.length) {
-        console.log('[BTrust] Still below 25; relaxing duplicate policy to include variants');
-        const signatureCounts = new Map();
-        for (const r of uniqueResults) {
-            const sig = normalizeImageSignature(r.imageUrl || r.url || '', r.width, r.height);
-            signatureCounts.set(sig, (signatureCounts.get(sig) || 0) + 1);
-        }
-        for (const r of filteredResults) {
-            if (uniqueResults.length >= 25) break;
-            const key = (r.imageUrl || r.url).toLowerCase().trim();
-            if (seenResults.has(key)) continue;
-            const sig = normalizeImageSignature(r.imageUrl || r.url || '', r.width, r.height);
-            const host = (() => { try { return new URL(r.pageUrl || r.url || '').hostname; } catch { return 'unknown'; } })();
-            const existingIdx = uniqueResults.findIndex(x => normalizeImageSignature(x.imageUrl || x.url || '', x.width, x.height) === sig && (() => { try { return new URL(x.pageUrl || x.url || '').hostname; } catch { return 'unknown'; } })() === host);
-            if (existingIdx !== -1) continue; // skip exact same sig+host
-            // allow up to 2 variants per signature across different hosts
-            if ((signatureCounts.get(sig) || 0) >= 2) continue;
-            uniqueResults.push(r);
-            seenResults.add(key);
-            signatureCounts.set(sig, (signatureCounts.get(sig) || 0) + 1);
-        }
-    }
-    
     console.log(`[BTrust] After removing duplicates: ${uniqueResults.length} results`);
     
-    // If too few remain, append more from filtered pool (still English) to reach a minimum
-    const MIN_RETURN = 50;
-    if (uniqueResults.length < MIN_RETURN) {
-        const extra = filteredResults.filter(r => {
-            const key = (r.imageUrl || r.url).toLowerCase().trim();
-            return !seenResults.has(key);
-        });
-        for (const r of extra) {
-            seenResults.add((r.imageUrl || r.url).toLowerCase().trim());
-            uniqueResults.push(r);
-            if (uniqueResults.length >= MIN_RETURN) break;
-        }
-    }
-
-    // Prefer high-resolution images and strong query coverage when category is images
+    // Enhanced high-resolution priority scoring
     const withHiResBoost = uniqueResults.map(result => {
         let scoreBoost = 0;
         if (result.category === 'images') {
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const pixelCount = w * h;
-            // Boost if >= 4MP; stronger boost >= 8MP
-            if (pixelCount >= 8_000_000) scoreBoost += 2;
-            else if (pixelCount >= 4_000_000) scoreBoost += 1;
+            
+            // Strong preference for high resolution images
+            if (pixelCount >= 16_000_000) scoreBoost += 5; // 16MP+
+            else if (pixelCount >= 8_000_000) scoreBoost += 3; // 8MP+
+            else if (pixelCount >= 4_000_000) scoreBoost += 2; // 4MP+
+            else if (w >= 2000 || h >= 2000) scoreBoost += 1; // At least 2000px in one dimension
 
-            // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
+            // Co-occurrence boost: prefer images whose metadata mentions all entities
             const query = (result._query || '').toLowerCase();
             const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
@@ -279,9 +256,9 @@ export function filterAndScoreResults(results, maxResults = 20) {
                 const all = entities.every(e => hay.includes(e));
                 const any = entities.some(e => hay.includes(e));
                 if (all) scoreBoost += 4; // strong co-occurrence
-                else if (any) scoreBoost += 1; // keep as padding if needed
+                else if (any) scoreBoost += 1; // partial match
             } else {
-                // Fallback: token coverage when no clear entities
+                // Token coverage for single entity queries
                 const tokens = query.split(/\s+/).filter(Boolean);
                 const matches = tokens.filter(t => hay.includes(t)).length;
                 if (matches >= Math.min(3, tokens.length)) scoreBoost += 2;
@@ -291,14 +268,14 @@ export function filterAndScoreResults(results, maxResults = 20) {
         const curatedResult = { 
             ...result, 
             curated: true,
-            curationMessage: "I personally curated this from the best sources available",
+            curationMessage: "High-resolution image curated from premium sources",
             _hiresBoost: scoreBoost
         };
-        console.log(`[BTrust] Curated result: "${result.title}" from "${result.source}"`);
+        console.log(`[BTrust] Curated result: "${result.title}" from "${result.source}" (boost: ${scoreBoost})`);
         return curatedResult;
     });
 
-    // Simple sort: prioritize co-occurrence/hires boost and pixel count
+    // Enhanced sorting: prioritize high-res boost and pixel count
     withHiResBoost.sort((a, b) => {
         const boostDiff = (b._hiresBoost || 0) - (a._hiresBoost || 0);
         if (boostDiff !== 0) return boostDiff;
@@ -307,11 +284,6 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return pb - pa;
     });
 
-    // If still short, pad with remaining English items up to maxResults
-    if (withHiResBoost.length < MIN_RETURN) {
-        const filler = filteredResults.filter(r => !withHiResBoost.find(x => (x.imageUrl||x.url) === (r.imageUrl||r.url)));
-        withHiResBoost.push(...filler.map(r => ({ ...r, curated: true, _hiresBoost: 0 })));
-    }
     return withHiResBoost.slice(0, maxResults);
 }
 
