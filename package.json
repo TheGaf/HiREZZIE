@@ -4,7 +4,8 @@
   "description": "Chrome extension for finding hi-res images",
   "scripts": {
     "build": "node build.js",
-    "dev": "node build.js --dev"
+    "dev": "node build.js --dev",
+    "test": "node test-extension.js"
   },
   "devDependencies": {
     "fs": "^0.0.1-security"

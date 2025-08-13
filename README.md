@@ -58,6 +58,14 @@ For development with placeholder values:
 npm run dev
 ```
 
+### Testing
+
+To verify the extension structure is valid:
+
+```bash
+npm test
+```
+
 ### Loading in Chrome
 
 1. Open Chrome and go to `chrome://extensions/`
