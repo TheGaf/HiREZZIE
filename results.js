@@ -100,6 +100,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    let currentSearchController = null;
+
+function cancelCurrentSearch() {
+    if (currentSearchController) {
+        currentSearchController.abort();
+        currentSearchController = null;
+        console.log('[Results] Cancelled previous search');
+    }
+}
+
     // Search button click
     if (searchBtn) {
         searchBtn.addEventListener('click', performNewSearch);
