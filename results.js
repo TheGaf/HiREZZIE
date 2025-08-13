@@ -229,10 +229,14 @@ function cancelCurrentSearch() {
         }
     };
 
-    function runSearch(q) {
-        const useQuery = q || query;
-        if (!useQuery) return;
-        showLoading(true);
+function runSearch(q) {
+    // Add this line at the beginning
+    cancelCurrentSearch();
+    currentSearchController = new AbortController();
+    
+    const useQuery = q || query;
+    if (!useQuery) return;
+    showLoading(true);
         // pre-fill grid with skeletons to show progress
         if (resultsGrid) {
           resultsGrid.innerHTML = '';
