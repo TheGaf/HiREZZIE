@@ -1,0 +1,29 @@
+# Generated configuration file (contains API keys)
+config.js
+
+# Node.js dependencies (if any)
+node_modules/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Build artifacts
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

@@ -1,21 +1,8 @@
 // Simple background service worker for hiREZZIE
 
-// API Configuration - replace with your actual key values
-const API_CONFIG = {
-  google: {
-    apiKey: 'YOUR_GOOGLEIMAGES_KEY_VALUE_HERE',  // Your GOOGLEIMAGES_KEY value
-    searchEngineId: 'YOUR_GOOGLE_SEARCH_KEY_VALUE_HERE'  // Your GOOGLE_SEARCH_KEY value
-  },
-  brave: {
-    apiKey: 'YOUR_BRAVE_KEY_VALUE_HERE'  // Your BRAVE_KEY value
-  },
-  serpapi: {
-    apiKey: 'YOUR_SERPAPI_KEY_VALUE_HERE'  // Your SERPAPI_KEY value
-  },
-  newsapi: {
-    apiKey: 'YOUR_GNEWS_KEY_VALUE_HERE'  // Your GNEWS_KEY value
-  }
-};
+// Import API configuration from generated config.js
+// This file is created by the build process from environment variables
+importScripts('config.js');
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'searchImages') {
