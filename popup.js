@@ -73,15 +73,13 @@ class HiRezziePopup {
       return;
     }
     
-
-    
-    // Build search parameters
+    // Build search parameters - images only in streamlined architecture
     const sortToggle = document.getElementById('popupSortToggle');
     const mode = sortToggle && sortToggle.checked ? 'relevant' : 'recent';
 
     const params = new URLSearchParams({
       q: query,
-      categories: 'images',
+      categories: 'images', // Force images only
       useAI: 'false',
       exact: this.config.exactDefault ? 'true' : 'false',
       mode
