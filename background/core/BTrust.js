@@ -152,20 +152,23 @@ export function filterAndScoreResults(results, maxResults = 20) {
             // Must have image URL
             if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
             
-            // ULTRA HI-RES REQUIREMENT: Must be at least 2MP (minimum acceptable)
+            // RELAXED HI-RES REQUIREMENT for collaborations: Accept 0.5MP+ for better results
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const megaPixels = (w * h) / 1_000_000;
             
-            if (megaPixels >= 2) return true; // 2MP minimum
+            if (megaPixels >= 0.5) return true; // Relaxed minimum for collaborations
             
-            // If no dimensions available, allow it (will be sorted low)
+            // If no dimensions available, allow it (will be sorted by quality)
             if (w === 0 || h === 0) return true;
             
-            return false; // Under 2MP = reject
+            // Accept reasonable individual dimensions
+            if (w >= 600 || h >= 600) return true;
+            
+            return false; // Only reject very small images
         });
         
-        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results meet minimum 2MP requirement`);
+        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results meet relaxed quality requirements`);
         
         // Sort by COMBINED collaboration + hi-res score
         hiResResults.sort((a, b) => {
@@ -208,17 +211,21 @@ export function filterAndScoreResults(results, maxResults = 20) {
             return false;
         }
         
-        // ULTRA HI-RES REQUIREMENT: Must be at least 2MP
+        // RELAXED HI-RES REQUIREMENT: Focus on quality over strict megapixel count
         const w = Number(result.width || 0);
         const h = Number(result.height || 0);
         const megaPixels = (w * h) / 1_000_000;
         
-        if (megaPixels >= 2) return true; // 2MP minimum
+        // Accept images with at least 0.5MP (720x720 or similar) for better results
+        if (megaPixels >= 0.5) return true; // Much more relaxed minimum
         
-        // If no dimensions available, allow it (will be sorted low)
+        // If no dimensions available, allow it (will be sorted by quality later)
         if (w === 0 || h === 0) return true;
         
-        return false; // Under 2MP = reject
+        // Also accept images with reasonable individual dimensions even if under 0.5MP
+        if (w >= 600 || h >= 600) return true; // Accept if either dimension is decent
+        
+        return false; // Only reject very small images
     });
     
     console.log(`[BTrust] After HI-RES filtering: ${filteredResults.length} results`);

@@ -2,7 +2,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
     const query = urlParams.get('q');
-    const initialMode = urlParams.get('mode');
     const categories = ['images'];
     const useAI = false;
     const exact = urlParams.get('exact') === 'true';
@@ -55,32 +54,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // No category filter buttons in simplified UI
 
-    // New search functionality
-    function getSortMode() {
-        const toggle = document.getElementById('sortToggle');
-        return (toggle && toggle.checked) ? 'relevant' : 'recent';
-    }
-
-    // Initialize toggle from URL mode, otherwise from stored mode
-    const modeReady = new Promise((resolve) => {
-        const applyMode = (mode) => {
-            const toggle = document.getElementById('sortToggle');
-            if (toggle) toggle.checked = (mode === 'relevant');
-            resolve();
-        };
-        if (initialMode === 'relevant' || initialMode === 'recent') {
-            applyMode(initialMode);
-            return;
-        }
-        try {
-            chrome.storage.sync.get(['sortMode'], ({ sortMode }) => {
-                applyMode(sortMode === 'relevant' ? 'relevant' : 'recent');
-            });
-        } catch {
-            applyMode('recent');
-        }
-    });
-
     function performNewSearch() {
         const newQuery = searchInput.value.trim();
         if (!newQuery) return;
@@ -91,8 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             
             // Navigate to new search
-            const mode = getSortMode();
-            const newUrl = `results.html?q=${encodeURIComponent(newQuery)}&categories=images&exact=true&mode=${mode}`;
+            const newUrl = `results.html?q=${encodeURIComponent(newQuery)}&categories=images&exact=true`;
             window.location.href = newUrl;
         } else if (newQuery === query) {
             // Re-run the same search in place

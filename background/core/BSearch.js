@@ -71,18 +71,11 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
     const collaboration = detectCollaborationIntent(query);
     
     let promises = [];
-    const sortMode = options.sortMode || 'recent';
-    
     switch (category) {
         case 'articles':
-            // Wider window if relevant; otherwise recent only
-            if (sortMode === 'relevant') {
-                promises.push(searchGNews(query, apiKeys.gnews, offset, 30));
-                promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30));
-            } else {
-                promises.push(searchGNews(query, apiKeys.gnews, offset, 1));
-                promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 1));
-            }
+            // Comprehensive article search focused on quality
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30));
             promises.push(searchBrave(query, apiKeys.brave, offset));
             break;
             
@@ -139,7 +132,8 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             
             // Free-only mode: build images from article sources by extracting OG images
             if (searchConfig?.usePaidImageAPIs === false) {
-                const dayWindows = (sortMode === 'relevant') ? [null, 30, 90] : [1, 3, 7];
+                // Comprehensive search across time windows for quality images
+                const dayWindows = [null, 30, 90]; // No date restrictions, focus on quality
                 for (const d of dayWindows) {
                     promises.push(searchGNews(apiQuery, apiKeys.gnews, offset, d));
                     promises.push(searchNewsAPIOrg(apiQuery, apiKeys.newsapi_org, searchConfig, offset, d));
@@ -149,7 +143,7 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                 
                 const bingOffsets = [0, 50, 100, 150, 200];
                 for (const off of bingOffsets) {
-                    promises.push(searchBingImages(apiQuery, off, { sortMode }));
+                    promises.push(searchBingImages(apiQuery, off));
                 }
                 break;
             }
@@ -187,7 +181,7 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             
             const bingOffsets2 = [0, 50, 100];
             for (const off of bingOffsets2) {
-                promises.push(searchBingImages(apiQuery, off, { sortMode }));
+                promises.push(searchBingImages(apiQuery, off));
             }
             
             // Paid SerpApi with collaboration support
@@ -524,7 +518,6 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 const serpOptions = {
                     exactPhrases: collaboration?.isCollaboration ? true : options?.exactPhrases,
                     autoRelax: true,
-                    sortMode: options?.sortMode,
                     collaboration: collaboration
                 };
                 const serp = await searchSerpApiImages(query, apiKeys.serpApi, 0, serpOptions);

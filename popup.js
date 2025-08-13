@@ -26,17 +26,6 @@ class HiRezziePopup {
     
     // Validate on input change
     document.getElementById('searchInput').addEventListener('input', () => this.validateSearch());
-
-    // Sort toggle persistence
-    const sortToggle = document.getElementById('popupSortToggle');
-    if (sortToggle) {
-      chrome.storage.sync.get(['sortMode'], ({ sortMode }) => {
-        sortToggle.checked = sortMode === 'relevant';
-      });
-      sortToggle.addEventListener('change', () => {
-        chrome.storage.sync.set({ sortMode: sortToggle.checked ? 'relevant' : 'recent' });
-      });
-    }
     
     // Logo error handling
     const popupLogo = document.getElementById('popupLogo');
@@ -76,15 +65,11 @@ class HiRezziePopup {
 
     
     // Build search parameters
-    const sortToggle = document.getElementById('popupSortToggle');
-    const mode = sortToggle && sortToggle.checked ? 'relevant' : 'recent';
-
     const params = new URLSearchParams({
       q: query,
       categories: 'images',
       useAI: 'false',
-      exact: this.config.exactDefault ? 'true' : 'false',
-      mode
+      exact: this.config.exactDefault ? 'true' : 'false'
     });
     
     // Open results page
