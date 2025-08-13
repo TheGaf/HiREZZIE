@@ -13,43 +13,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-async function getApiKeys() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(['apiKeys'], (result) => {
-      resolve(result.apiKeys || {});
-    });
-  });
-}
-
 async function searchImages(query, mode) {
   console.log(`Searching for: ${query} (${mode} mode)`);
   
-  const API_KEYS = await getApiKeys();
   const allImages = [];
   
-  // Try multiple sources
+  // Use only free sources - no API keys needed!
   const searches = [
     searchBing(query, mode),
-    searchYahoo(query, mode)
+    searchYahoo(query, mode),
+    searchDuckDuckGo(query, mode)
   ];
-  
-  // Only use paid APIs if keys are configured
-  if (API_KEYS.google?.apiKey && API_KEYS.google?.cx) {
-    searches.push(searchGoogle(query, mode, API_KEYS.google));
-  }
-  
-  if (API_KEYS.serpapi) {
-    searches.push(searchSerpApi(query, mode, API_KEYS.serpapi));
-  }
-  
-  if (API_KEYS.brave) {
-    searches.push(searchBrave(query, mode, API_KEYS.brave));
-  }
   
   const results = await Promise.allSettled(searches);
   
   results.forEach((result, index) => {
-    const sources = ['Bing', 'Yahoo', 'Google', 'SerpApi', 'Brave'];
+    const sources = ['Bing', 'Yahoo', 'DuckDuckGo'];
     if (result.status === 'fulfilled' && result.value) {
       console.log(`${sources[index]} returned ${result.value.length} images`);
       allImages.push(...result.value);
@@ -69,30 +48,6 @@ async function searchImages(query, mode) {
   });
   
   return uniqueImages.slice(0, 50);
-}
-
-async function searchGoogle(query, mode, keys) {
-  try {
-    const url = `https://www.googleapis.com/customsearch/v1?key=${keys.apiKey}&cx=${keys.cx}&q=${encodeURIComponent(query)}&searchType=image&imgSize=xlarge&num=10`;
-    
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Google API error: ${response.status}`);
-    
-    const data = await response.json();
-    
-    return (data.items || []).map(item => ({
-      url: item.link,
-      thumbnail: item.image?.thumbnailLink || item.link,
-      title: item.title,
-      source: 'Google',
-      sourceUrl: item.image?.contextLink || item.link,
-      width: item.image?.width,
-      height: item.image?.height
-    }));
-  } catch (error) {
-    console.error('Google search error:', error);
-    return [];
-  }
 }
 
 async function searchBing(query, mode) {
@@ -117,7 +72,7 @@ async function searchBing(query, mode) {
         const data = JSON.parse(jsonMatch[1]);
         if (data.IG && data.IG.IM) {
           data.IG.IM.forEach(item => {
-            if (images.length >= 15) return;
+            if (images.length >= 20) return;
             
             images.push({
               url: item.mu || item.murl,
@@ -161,7 +116,7 @@ async function searchYahoo(query, mode) {
     const imageRegex = /"url":"([^"]+)","ow":(\d+),"oh":(\d+)[^}]*"ru":"([^"]+)"/g;
     let match;
     
-    while ((match = imageRegex.exec(html)) !== null && images.length < 15) {
+    while ((match = imageRegex.exec(html)) !== null && images.length < 20) {
       try {
         const imageUrl = decodeURIComponent(match[1].replace(/\\/g, ''));
         const width = parseInt(match[2]);
@@ -191,56 +146,39 @@ async function searchYahoo(query, mode) {
   }
 }
 
-async function searchSerpApi(query, mode, apiKey) {
+async function searchDuckDuckGo(query, mode) {
   try {
-    const url = `https://serpapi.com/search.json?engine=google_images&q=${encodeURIComponent(query)}&api_key=${apiKey}&tbs=isz:l&num=20`;
-    
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`SerpApi error: ${response.status}`);
-    
-    const data = await response.json();
-    
-    return (data.images_results || []).map(item => ({
-      url: item.original,
-      thumbnail: item.thumbnail,
-      title: item.title || query,
-      source: 'Google (SerpApi)',
-      sourceUrl: item.link,
-      width: item.original_width,
-      height: item.original_height
-    }));
-  } catch (error) {
-    console.error('SerpApi search error:', error);
-    return [];
-  }
-}
-
-async function searchBrave(query, mode, apiKey) {
-  try {
-    const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=20`;
+    // DuckDuckGo images API (free, no key needed)
+    const url = `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&o=json&p=1&s=0&u=bing&f=1&l=us-en`;
     
     const response = await fetch(url, {
       headers: {
-        'Accept': 'application/json',
-        'X-Subscription-Token': apiKey
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
     
-    if (!response.ok) throw new Error(`Brave error: ${response.status}`);
+    if (!response.ok) throw new Error(`DuckDuckGo error: ${response.status}`);
     
     const data = await response.json();
+    const images = [];
     
-    return (data.results || []).map(item => ({
-      url: item.src,
-      thumbnail: item.thumbnail?.src || item.src,
-      title: item.title || query,
-      source: 'Brave',
-      sourceUrl: item.url,
-      width: item.properties?.width,
-      height: item.properties?.height
-    }));
+    (data.results || []).forEach(item => {
+      if (images.length >= 15) return;
+      
+      images.push({
+        url: item.image,
+        thumbnail: item.thumbnail,
+        title: item.title || query,
+        source: 'DuckDuckGo',
+        sourceUrl: item.url,
+        width: item.width || 0,
+        height: item.height || 0
+      });
+    });
+    
+    return images;
   } catch (error) {
-    console.error('Brave search error:', error);
+    console.error('DuckDuckGo search error:', error);
     return [];
   }
 }
@@ -303,9 +241,9 @@ function getImageScore(image, query, mode) {
   if (titleLower.includes(queryLower)) score += 50;
   
   // Source priority
-  if (image.source === 'Google (SerpApi)') score += 20;
-  else if (image.source === 'Google') score += 15;
-  else if (image.source === 'Bing') score += 10;
+  if (image.source === 'Bing') score += 10;
+  else if (image.source === 'Yahoo') score += 8;
+  else if (image.source === 'DuckDuckGo') score += 5;
   
   return score;
 }
