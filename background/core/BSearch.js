@@ -1,6 +1,6 @@
 // background/core/BSearch.js
 import { resetDuplicateCache } from './BTrust.js';
-import { fetchOpenGraphData } from '../utils/BUtils.js';
+import { fetchOpenGraphData, headCheck } from '../utils/BUtils.js';
 import { searchGNews } from '../api/gnews.js';
 import { searchNewsAPIOrg } from '../api/news.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
@@ -36,8 +36,8 @@ async function processOGQueue() {
         } catch (e) {
             reject(e);
         }
-        // Wait 100ms between requests to avoid rate limits
-        await new Promise(r => setTimeout(r, 100));
+        // Reduced wait time for faster processing
+        await new Promise(r => setTimeout(r, 50));
     }
     ogProcessing = false;
 }
@@ -49,7 +49,64 @@ function queueOGRequest(result) {
     });
 }
 
-function simpleFilter(results, maxResults = 50) {
+// Image quality validation
+async function validateImageQuality(result) {
+    try {
+        const imageUrl = result.imageUrl || result.url;
+        if (!imageUrl) return false;
+        
+        // Quick format check first
+        if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+            return false;
+        }
+        
+        // Skip validation if we already have good dimension/size info
+        const w = Number(result.width || 0);
+        const h = Number(result.height || 0);
+        const bytes = Number(result.byteSize || 0);
+        
+        // If we have reliable metadata, use it
+        if (w && h) {
+            const pixels = w * h;
+            const is2000px = w >= 2000 || h >= 2000;
+            const is4mp = pixels >= 4_000_000;
+            const is8mp = pixels >= 8_000_000;
+            
+            if (is8mp || is4mp || is2000px) {
+                console.log(`[BSearch] HIRES via metadata: ${w}x${h} (${Math.round(pixels/1000000)}MP)`);
+                return true;
+            }
+        }
+        
+        if (bytes >= 1_500_000) {
+            console.log(`[BSearch] HIRES via filesize: ${Math.round(bytes/1000000)}MB`);
+            return true;
+        }
+        
+        // For images without metadata, do a HEAD check (rate limited)
+        const head = await headCheck(imageUrl);
+        if (!head.ok) {
+            console.log(`[BSearch] HEAD check failed for: ${imageUrl}`);
+            return false;
+        }
+        
+        // Check file size
+        if (head.contentLength && head.contentLength >= 150_000) {
+            console.log(`[BSearch] HIRES via HEAD check: ${Math.round(head.contentLength/1000)}KB`);
+            return true;
+        }
+        
+        console.log(`[BSearch] Image too small: ${imageUrl} (${head.contentLength || 'unknown'} bytes)`);
+        return false;
+        
+    } catch (e) {
+        console.warn(`[BSearch] Quality check failed for ${result.imageUrl || result.url}:`, e.message);
+        // If validation fails, assume it's good to avoid losing results
+        return true;
+    }
+}
+
+function simpleFilter(results, maxResults = 200) {
     if (!results || results.length === 0) {
         return [];
     }
@@ -80,9 +137,17 @@ function simpleFilter(results, maxResults = 50) {
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const pixelCount = w * h;
-            if (pixelCount >= 8_000_000) score += 3;
-            else if (pixelCount >= 4_000_000) score += 2;
-            else if (pixelCount >= 2_000_000) score += 1;
+            const bytes = Number(result.byteSize || 0);
+            
+            // MAJOR boosts for verified high-res
+            if (pixelCount >= 8_000_000) score += 5;      // 8MP+ 
+            else if (pixelCount >= 4_000_000) score += 4; // 4MP+
+            else if (pixelCount >= 2_000_000) score += 3; // 2MP+
+            else if (w >= 2000 || h >= 2000) score += 2;  // 2000px+
+            
+            if (bytes >= 3_000_000) score += 3;           // 3MB+
+            else if (bytes >= 1_500_000) score += 2;      // 1.5MB+
+            else if (bytes >= 500_000) score += 1;        // 500KB+
         }
         
         // ENHANCED co-occurrence scoring
@@ -116,7 +181,7 @@ function simpleFilter(results, maxResults = 50) {
         return { ...result, _score: score };
     });
     
-    // Sort by score (highest first) - true collaborations will be at top
+    // Sort by score (highest first) - true collaborations + hires will be at top
     scoredResults.sort((a, b) => (b._score || 0) - (a._score || 0));
     
     const final = scoredResults.slice(0, maxResults);
@@ -124,7 +189,10 @@ function simpleFilter(results, maxResults = 50) {
     
     // Log top scoring results for debugging
     final.slice(0, 5).forEach((result, i) => {
-        console.log(`[BSearch] Top result #${i+1}: "${result.title}" (score: ${result._score}) from ${result.source}`);
+        const w = result.width || 0;
+        const h = result.height || 0;
+        const mp = Math.round((w * h) / 1000000);
+        console.log(`[BSearch] Top result #${i+1}: "${result.title}" (score: ${result._score}, ${w}x${h} ${mp}MP) from ${result.source}`);
     });
     
     return final;
@@ -145,28 +213,44 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             // Free sources first
             promises.push(searchBraveImages(query, apiKeys.brave, offset));
             
-            // Multiple Bing pages for volume
-            const bingOffsets = [0, 50, 100, 150];
+            // MASSIVE Bing coverage - up to 800 results
+            const bingOffsets = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750];
             for (const off of bingOffsets) {
                 promises.push(searchBingImages(query, off, options));
             }
             
-            // Google CSE if available
+            // Google CSE if available - multiple pages
             if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
-                promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset, options));
+                const googleOffsets = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+                for (const off of googleOffsets) {
+                    promises.push(searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, off, options));
+                }
             }
             
-            // SerpApi if available (but don't fail if it errors)
+            // SerpApi if available - multiple offsets
             if (apiKeys?.serpApi) {
-                promises.push(searchSerpApiImages(query, apiKeys.serpApi, offset, options).catch(e => {
-                    console.warn('[BSearch] SerpApi failed:', e.message);
-                    return []; // Return empty array instead of failing
-                }));
+                const serpOffsets = [0, 100, 200, 300, 400];
+                for (const off of serpOffsets) {
+                    promises.push(searchSerpApiImages(query, apiKeys.serpApi, off, options).catch(e => {
+                        console.warn(`[BSearch] SerpApi failed at offset ${off}:`, e.message);
+                        return [];
+                    }));
+                }
             }
             
-            // Get images from news articles too
-            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));
+            // Get images from news articles too - multiple time ranges
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 7));   // Last week
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 30));  // Last month
+            promises.push(searchGNews(query, apiKeys.gnews, offset, 90));  // Last 3 months
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 7));
             promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 30));
+            promises.push(searchNewsAPIOrg(query, apiKeys.newsapi_org, searchConfig, offset, 90));
+            
+            // Multiple Brave offsets
+            const braveOffsets = [0, 10, 20, 30, 40];
+            for (const off of braveOffsets) {
+                promises.push(searchBraveImages(query, apiKeys.brave, off));
+            }
             break;
             
         case 'videos':
@@ -210,14 +294,14 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 _query: query 
             }));
             
-            // For images, selectively extract direct image URLs (rate limited)
+            // For images, extract URLs and validate quality
             if (category === 'images') {
                 console.log(`[BSearch] Processing ${resultsWithMeta.length} image results...`);
                 
-                // Only try OG extraction for non-image URLs and limit to top 10 results
+                // Extract direct image URLs (rate limited)
                 const needsOG = resultsWithMeta
                     .filter(result => !result.imageUrl?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i))
-                    .slice(0, 10); // Limit to prevent rate limiting
+                    .slice(0, 20);
                 
                 for (const result of needsOG) {
                     try {
@@ -230,7 +314,6 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                             result.ogAlt = og.alt;
                         }
                     } catch (e) {
-                        // Silently handle OG failures
                         if (result.url?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
                             result.imageUrl = result.url;
                         }
@@ -247,11 +330,35 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                     }
                 }
                 
-                console.log(`[BSearch] Completed processing images`);
+                // QUALITY VALIDATION - Filter out low-res images
+                console.log(`[BSearch] Validating image quality for ${resultsWithMeta.length} results...`);
+                const qualityPromises = resultsWithMeta.map(async (result) => {
+                    const isHighRes = await validateImageQuality(result);
+                    return isHighRes ? result : null;
+                });
+                
+                // Process in batches to avoid overwhelming APIs
+                const qualityResults = [];
+                const batchSize = 10;
+                for (let i = 0; i < qualityPromises.length; i += batchSize) {
+                    const batch = qualityPromises.slice(i, i + batchSize);
+                    const batchResults = await Promise.all(batch);
+                    qualityResults.push(...batchResults.filter(Boolean));
+                    
+                    // Small delay between batches
+                    if (i + batchSize < qualityPromises.length) {
+                        await new Promise(r => setTimeout(r, 100));
+                    }
+                }
+                
+                console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed`);
+                
+                // Use quality-validated results
+                allResults[category] = simpleFilter(qualityResults, 200);
+            } else {
+                // Non-images don't need quality validation
+                allResults[category] = simpleFilter(resultsWithMeta, 200);
             }
-            
-            // Simple filtering - accept almost everything but prioritize co-occurrence
-            allResults[category] = simpleFilter(resultsWithMeta, 100);
             
             console.log(`[BSearch] ${category} completed: ${allResults[category].length} results`);
             
@@ -278,10 +385,26 @@ export async function loadMoreResults(query, category, settings, offset, options
             _query: query 
         }));
         
-        const filtered = simpleFilter(resultsWithMeta, 30);
-        console.log(`[BSearch] LoadMore completed: ${filtered.length} results`);
+        // Quality validation for load more too
+        if (category === 'images') {
+            const qualityPromises = resultsWithMeta.map(async (result) => {
+                if (!result.imageUrl) result.imageUrl = result.url;
+                if (!result.thumbnail) result.thumbnail = result.imageUrl || result.url;
+                
+                const isHighRes = await validateImageQuality(result);
+                return isHighRes ? result : null;
+            });
+            
+            const qualityResults = (await Promise.all(qualityPromises)).filter(Boolean);
+            const filtered = simpleFilter(qualityResults, 50);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results`);
+            return filtered;
+        } else {
+            const filtered = simpleFilter(resultsWithMeta, 50);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} results`);
+            return filtered;
+        }
         
-        return filtered;
     } catch (error) {
         console.error('[BSearch] LoadMore failed:', error);
         return [];
