@@ -42,7 +42,7 @@ function simpleFilter(results, maxResults = 50) {
     
     console.log(`[BSearch] After deduplication: ${uniqueResults.length} results`);
     
-    // Add basic scoring but don't filter anything out
+    // Add advanced scoring for co-occurrence
     const scoredResults = uniqueResults.map(result => {
         let score = 0;
         
@@ -56,23 +56,47 @@ function simpleFilter(results, maxResults = 50) {
             else if (pixelCount >= 2_000_000) score += 1;
         }
         
-        // Boost co-occurrence matches
+        // ENHANCED co-occurrence scoring
         const query = (result._query || '').toLowerCase();
-        const entities = query.split(/\s+(?:and|&|vs|x|with|,)\s+/g).map(s => s.trim()).filter(Boolean);
+        const entities = query.split(/\s+(?:and|&|vs|x|with|,|\+)\s+/g).map(s => s.trim()).filter(Boolean);
+        
         if (entities.length > 1) {
-            const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
-            const matchCount = entities.filter(e => hay.includes(e)).length;
-            score += matchCount * 2; // 2 points per entity match
+            // Check all available text fields for entity mentions
+            const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
+            
+            const entityMatches = entities.filter(e => hay.includes(e)).length;
+            
+            // HUGE boost for images that mention ALL entities (true collaboration)
+            if (entityMatches === entities.length) {
+                score += 10; // Massive boost for true co-occurrence
+                console.log(`[BSearch] TRUE CO-OCCURRENCE found: "${result.title}" mentions all entities: ${entities.join(', ')}`);
+            }
+            // Good boost for partial matches
+            else if (entityMatches > 0) {
+                score += entityMatches * 2;
+            }
+            
+            // Extra boost for collaboration keywords
+            const collabKeywords = ['together', 'collaboration', 'collab', 'with', 'featuring', 'feat', 'and', '&', 'vs', 'interview', 'podcast', 'hot ones'];
+            const collabMatches = collabKeywords.filter(kw => hay.includes(kw)).length;
+            if (collabMatches > 0) {
+                score += collabMatches;
+            }
         }
         
         return { ...result, _score: score };
     });
     
-    // Sort by score (highest first) but keep everything
+    // Sort by score (highest first) - true collaborations will be at top
     scoredResults.sort((a, b) => (b._score || 0) - (a._score || 0));
     
     const final = scoredResults.slice(0, maxResults);
     console.log(`[BSearch] Final results: ${final.length} (max: ${maxResults})`);
+    
+    // Log top scoring results for debugging
+    final.slice(0, 5).forEach((result, i) => {
+        console.log(`[BSearch] Top result #${i+1}: "${result.title}" (score: ${result._score}) from ${result.source}`);
+    });
     
     return final;
 }
@@ -157,25 +181,36 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 _query: query 
             }));
             
-            // For images, try to extract from article pages if needed
+            // For images, aggressively extract direct image URLs
             if (category === 'images') {
+                console.log(`[BSearch] Extracting direct image URLs from ${resultsWithMeta.length} results...`);
+                
                 for (const result of resultsWithMeta) {
-                    // If it's an article page, try to get the main image
-                    if (!result.imageUrl && result.url && !result.url.match(/\.(jpg|jpeg|png|webp|avif)$/i)) {
+                    // If it's not already a direct image URL, extract from page
+                    const isDirectImage = result.imageUrl && result.imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
+                    
+                    if (!isDirectImage && result.url) {
                         try {
+                            console.log(`[BSearch] Extracting OG data from: ${result.url}`);
                             const og = await fetchOpenGraphData(result.url);
                             if (og?.image) {
+                                console.log(`[BSearch] Found OG image: ${og.image}`);
                                 result.imageUrl = og.image;
                                 result.thumbnail = og.image;
                                 result.ogTitle = og.title;
                                 result.ogDescription = og.description;
+                                result.ogAlt = og.alt;
                             }
                         } catch (e) {
-                            // Ignore OG fetch errors
+                            console.warn(`[BSearch] OG extraction failed for ${result.url}:`, e.message);
+                            // If OG fails, try to use the original URL if it looks like an image
+                            if (result.url && result.url.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+                                result.imageUrl = result.url;
+                            }
                         }
                     }
                     
-                    // Ensure we have an imageUrl for images
+                    // Ensure all image results have imageUrl
                     if (!result.imageUrl) {
                         result.imageUrl = result.url;
                     }
@@ -183,9 +218,11 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                         result.thumbnail = result.imageUrl || result.url;
                     }
                 }
+                
+                console.log(`[BSearch] Completed OG extraction for images`);
             }
             
-            // Simple filtering - accept almost everything
+            // Simple filtering - accept almost everything but prioritize co-occurrence
             allResults[category] = simpleFilter(resultsWithMeta, 100);
             
             console.log(`[BSearch] ${category} completed: ${allResults[category].length} results`);
@@ -212,6 +249,37 @@ export async function loadMoreResults(query, category, settings, offset, options
             category, 
             _query: query 
         }));
+        
+        // Extract image URLs for load more too
+        if (category === 'images') {
+            for (const result of resultsWithMeta) {
+                const isDirectImage = result.imageUrl && result.imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
+                
+                if (!isDirectImage && result.url) {
+                    try {
+                        const og = await fetchOpenGraphData(result.url);
+                        if (og?.image) {
+                            result.imageUrl = og.image;
+                            result.thumbnail = og.image;
+                            result.ogTitle = og.title;
+                            result.ogDescription = og.description;
+                            result.ogAlt = og.alt;
+                        }
+                    } catch (e) {
+                        if (result.url && result.url.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+                            result.imageUrl = result.url;
+                        }
+                    }
+                }
+                
+                if (!result.imageUrl) {
+                    result.imageUrl = result.url;
+                }
+                if (!result.thumbnail) {
+                    result.thumbnail = result.imageUrl || result.url;
+                }
+            }
+        }
         
         const filtered = simpleFilter(resultsWithMeta, 30);
         console.log(`[BSearch] LoadMore completed: ${filtered.length} results`);
