@@ -6,31 +6,67 @@
   <title>hiREZZIE</title>
   <link rel="icon" type="image/png" href="icon48.png">
   <link rel="stylesheet" href="shared.css">
-      <style>
-      body { width: 400px; max-width: 400px; min-width: 400px; padding: 12px; margin: 0 auto; overflow-x: hidden; }
-      
-      .popup .container {
-        width: 100%; max-width: 376px; padding: 0; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 10px;
-      }
-      
-      .popup .search-section {
-        width: 100%; max-width: 376px; display: flex; flex-direction: column; gap: 8px;
-      }
-      
-      .popup .search-btn {
-        width: 100%; max-width: 376px; margin-top: 4px; padding: 10px; font-size: 14px; font-weight: 700;
-      }
-      
-      .brand { width: 100%; display: flex; justify-content: center; }
-      .brand img { width: 90%; height: auto; display: block; }
-    </style>
+  <style>
+    body { 
+      width: 400px; 
+      max-width: 400px; 
+      min-width: 400px; 
+      padding: 12px; 
+      margin: 0 auto; 
+      overflow-x: hidden; 
+    }
+    
+    .popup .container {
+      width: 100%; 
+      max-width: 376px; 
+      padding: 0; 
+      margin: 0 auto; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      gap: 10px;
+    }
+    
+    .popup .search-section {
+      width: 100%; 
+      max-width: 376px; 
+      display: flex; 
+      flex-direction: column; 
+      gap: 8px;
+    }
+    
+    .popup .search-btn {
+      width: 100%; 
+      max-width: 376px; 
+      margin-top: 4px; 
+      padding: 10px; 
+      font-size: 14px; 
+      font-weight: 700;
+    }
+    
+    .brand { 
+      width: 100%; 
+      display: flex; 
+      justify-content: center; 
+    }
+    
+    .brand img { 
+      width: 90%; 
+      height: auto; 
+      display: block; 
+    }
+  </style>
 </head>
 <body class="popup">
   <div class="container">
     <div class="brarian-logo brand">
       <img src="HIRezzie.png" alt="hiREZZIE" id="popupLogo" />
     </div>
-    <div class="built-by">built by <a href="https://gaf.nyc" target="_blank" rel="noopener noreferrer"><img src="BG_QR.webp" alt="gaf.nyc" class="qr-bug" onerror="this.style.display='none'"></a></div>
+    <div class="built-by">
+      built by <a href="https://gaf.nyc" target="_blank" rel="noopener noreferrer">
+        <img src="BG_QR.webp" alt="gaf.nyc" class="qr-bug" onerror="this.style.display='none'">
+      </a>
+    </div>
     
     <div class="search-section">
       <input 
@@ -42,16 +78,7 @@
         aria-label="Search query"
       >
       
-      <!-- Search button moved outside search-section -->
       <button id="searchBtn" class="search-btn" type="button">Search</button>
-      <div class="sort-toggle" aria-label="Sort mode" style="margin-top:6px;">
-        <span>Recent</span>
-        <label class="switch">
-          <input type="checkbox" id="popupSortToggle">
-          <span class="slider"></span>
-        </label>
-        <span>Relevant</span>
-      </div>
     </div>
   </div>
   
