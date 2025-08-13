@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
         
         // AI APIs (for future use)
         openai: 'OPENAI_KEY',
-        groq: 'GROG_KEY'
+        groq: 'GROQ_KEY'
     },
     searchConfig: {
         newsFreshnessDays: 90,
