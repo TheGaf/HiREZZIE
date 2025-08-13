@@ -1,26 +1,30 @@
 // results.js - Enhanced version with performance monitoring and infinite scroll
-import { VirtualScroller } from './utils/VirtualScroller.js';
-import { PerformanceMonitor } from './utils/PerformanceMonitor.js';
-
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize performance monitoring
-    const performanceMonitor = new PerformanceMonitor({
-        enabled: true,
-        sampleRate: 1.0
-    });
+    const performanceMonitor = {
+        startTimer: (name) => {
+            const start = performance.now();
+            return {
+                end: (metadata = {}) => {
+                    const duration = performance.now() - start;
+                    console.log(`[Performance] ${name}: ${duration.toFixed(2)}ms`, metadata);
+                    return duration;
+                }
+            };
+        },
+        recordMetric: (name, data) => {
+            console.log(`[Metrics] ${name}:`, data);
+        }
+    };
     
     // Track page load performance
-    const pageLoadTimer = performanceMonitor.timeFunction('page_load', () => {
-        return new Promise(resolve => {
-            if (document.readyState === 'complete') {
-                resolve();
-            } else {
-                window.addEventListener('load', resolve);
-            }
-        });
-    });
+    const pageLoadTimer = performanceMonitor.startTimer('page_load');
     
-    pageLoadTimer();
+    if (document.readyState === 'complete') {
+        pageLoadTimer.end();
+    } else {
+        window.addEventListener('load', () => pageLoadTimer.end());
+    }
     
     const urlParams = new URLSearchParams(window.location.search);
     const query = urlParams.get('q');
@@ -45,7 +49,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let isSearching = false;
     let currentQuery = query;
     let searchAbortController = null;
-    let virtualScroller = null;
     let allResults = [];
     let isInfiniteScrollEnabled = true;
     let lastSearchTime = 0;
@@ -257,74 +260,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Show live URLs while waiting by probing results as they arrive
 
-    const pickDirectImageUrl = (r) => {
-        const img = r?.imageUrl || null;
-        if (img) return img;
-        const u = r?.url || '';
-        if (/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(u)) return u;
-        return null;
-    };
-
-    const renderImageCard = (result) => {
-        if (!result) return null;
-        const directUrl = pickDirectImageUrl(result);
-        if (!directUrl) return null;
-        const card = document.createElement('div');
-        card.className = 'image-card';
-
-        const imageHref = directUrl;
-        const pageHref = result.contextLink || result.pageUrl || result.link || result.sourceUrl || imageHref;
-        const sourceText = result.source || '';
-
-        card.innerHTML = `
-            <a class="image-link" href="${imageHref}" target="_blank" rel="noopener noreferrer">
-                <img class="image-thumb loading" src="${imageHref}" alt="${result.title || sourceText}" loading="lazy" decoding="async" referrerpolicy="no-referrer">
-            </a>
-            <div class="image-credit"><a href="${pageHref}" target="_blank" rel="noopener noreferrer">${sourceText}</a> · <a href="${imageHref}" target="_blank" rel="noopener noreferrer">Open image</a></div>
-        `;
-
-        const img = card.querySelector('.image-thumb');
-        if (img) {
-            const onLoad = () => {
-                img.classList.remove('loading');
-                img.classList.add('loaded');
-            };
-            img.addEventListener('load', onLoad, { once: true });
-            img.addEventListener('error', () => {
-                img.classList.remove('loading');
-                img.classList.add('loaded');
-            }, { once: true });
-        }
-
-        return card;
-    };
-
-
-
-    // Directly render images into the grid (no category wrapper)
-    const renderImagesIntoGrid = (results) => {
-        const hadAny = resultsGrid.querySelectorAll('.image-card').length > 0;
-        if (results && results.length > 0) {
-            let appended = 0;
-            const seen = new Set(Array.from(resultsGrid.querySelectorAll('.image-card a.image-link')).map(a => a.href));
-            results.forEach(result => {
-                const node = renderImageCard(result);
-                if (node) {
-                    const href = node.querySelector('a.image-link')?.href;
-                    if (href && !seen.has(href)) { resultsGrid.appendChild(node); appended += 1; seen.add(href); }
-                }
-            });
-            // Only show no-results if we still have zero cards total
-            const totalNow = resultsGrid.querySelectorAll('.image-card').length;
-            if (appended === 0 && totalNow === 0) {
-                resultsRoot.innerHTML = '<p class="no-results">No direct images found from these sources.</p>';
-            }
-            if (resultsCuratedEl) resultsCuratedEl.textContent = String(totalNow);
-        } else if (!hadAny) {
-            resultsRoot.innerHTML = '<p class="no-results">No images found.</p>';
-        }
-    };
-
     // Enhanced search function with cancellation and performance monitoring
     function runSearch(q) {
         const searchTimer = performanceMonitor.startTimer('user_search');
@@ -354,9 +289,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Reset state
         allResults = [];
-        if (virtualScroller) {
-            virtualScroller.setItems([]);
-        }
         
         const params = new URLSearchParams(window.location.search);
         const modeParam = params.get('mode') || getSortMode();
@@ -486,19 +418,27 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Initialize virtual scroller for large result sets
+    // Simple virtual scroller implementation for large result sets
     function initializeVirtualScroller(items) {
-        if (virtualScroller) {
-            virtualScroller.destroy();
+        // For simplicity, we'll use a threshold-based approach
+        // If more than 50 items, render in batches
+        if (items.length <= 50) {
+            renderImagesDirectly(items);
+            return;
         }
         
-        // Create container for virtual scroller if needed
+        console.log(`[Results] Initializing virtual scrolling for ${items.length} items`);
+        
+        // Create scroll container
         let scrollContainer = document.getElementById('virtual-scroll-container');
         if (!scrollContainer) {
             scrollContainer = document.createElement('div');
             scrollContainer.id = 'virtual-scroll-container';
-            scrollContainer.style.height = '80vh';
-            scrollContainer.style.overflow = 'auto';
+            scrollContainer.style.cssText = `
+                height: 80vh;
+                overflow-y: auto;
+                padding: 20px;
+            `;
             
             if (resultsGrid) {
                 resultsGrid.style.display = 'none';
@@ -506,25 +446,58 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        virtualScroller = new VirtualScroller(scrollContainer, {
-            itemHeight: 250, // Approximate height of image cards
-            bufferSize: 5,
-            renderItem: (item, index) => createImageCard(item, index),
-            onLoadMore: () => {
-                if (isInfiniteScrollEnabled && !isSearching) {
-                    loadMoreResults();
-                }
-            },
-            onItemVisible: (element, isVisible) => {
-                if (isVisible) {
-                    // Lazy load images when visible
-                    lazyLoadImage(element);
+        // Simple batch rendering
+        let currentBatch = 0;
+        const batchSize = 20;
+        const batches = [];
+        
+        for (let i = 0; i < items.length; i += batchSize) {
+            batches.push(items.slice(i, i + batchSize));
+        }
+        
+        scrollContainer.innerHTML = '';
+        
+        // Create grid within scroll container
+        const grid = document.createElement('div');
+        grid.style.cssText = `
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        `;
+        scrollContainer.appendChild(grid);
+        
+        // Render initial batch
+        function renderBatch(batchIndex) {
+            if (batchIndex >= batches.length) return;
+            
+            const batch = batches[batchIndex];
+            batch.forEach((item, index) => {
+                const imageCard = createImageCard(item, batchIndex * batchSize + index);
+                grid.appendChild(imageCard);
+                lazyLoadImage(imageCard);
+            });
+        }
+        
+        // Render first few batches
+        renderBatch(0);
+        renderBatch(1);
+        currentBatch = 1;
+        
+        // Setup infinite scroll
+        scrollContainer.addEventListener('scroll', () => {
+            const scrollTop = scrollContainer.scrollTop;
+            const scrollHeight = scrollContainer.scrollHeight;
+            const clientHeight = scrollContainer.clientHeight;
+            
+            if (scrollTop + clientHeight >= scrollHeight - 1000) {
+                if (currentBatch + 1 < batches.length) {
+                    currentBatch++;
+                    renderBatch(currentBatch);
                 }
             }
         });
         
-        virtualScroller.setItems(items);
-        console.log(`[Results] Virtual scroller initialized with ${items.length} items`);
+        console.log(`[Results] Virtual scroller initialized with batched rendering`);
     }
 
     // Render images directly for smaller result sets
@@ -694,8 +667,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     allResults.push(...newResults);
                     
                     // Update display
-                    if (virtualScroller) {
-                        virtualScroller.addItems(newResults);
+                    const scrollContainer = document.getElementById('virtual-scroll-container');
+                    if (scrollContainer && scrollContainer.style.display !== 'none') {
+                        // Add to virtual scroll container
+                        const grid = scrollContainer.querySelector('div');
+                        if (grid) {
+                            newResults.forEach((item, index) => {
+                                const imageCard = createImageCard(item, allResults.length - newResults.length + index);
+                                grid.appendChild(imageCard);
+                                lazyLoadImage(imageCard);
+                            });
+                        }
                     } else {
                         // Add to grid directly
                         newResults.forEach((item, index) => {
@@ -740,8 +722,17 @@ document.addEventListener('DOMContentLoaded', function() {
             if (Array.isArray(newResults) && newResults.length > 0) {
                 allResults.push(...newResults);
                 
-                if (virtualScroller) {
-                    virtualScroller.addItems(newResults);
+                const scrollContainer = document.getElementById('virtual-scroll-container');
+                if (scrollContainer && scrollContainer.style.display !== 'none') {
+                    // Add to virtual scroll container
+                    const grid = scrollContainer.querySelector('div');
+                    if (grid) {
+                        newResults.forEach((item, index) => {
+                            const imageCard = createImageCard(item, offset + index);
+                            grid.appendChild(imageCard);
+                            lazyLoadImage(imageCard);
+                        });
+                    }
                 } else {
                     newResults.forEach((item, index) => {
                         const imageCard = createImageCard(item, offset + index);
