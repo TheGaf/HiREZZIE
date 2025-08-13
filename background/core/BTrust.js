@@ -82,39 +82,85 @@ function getHiResScore(result) {
     return score;
 }
 
-// Enhanced collaboration scoring function
+// Enhanced collaboration scoring function with aggressive filename analysis
 function scoreCollaborationResult(result, entities) {
     const haystack = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
     
-    let score = 0;
-    const entityMatches = entities.filter(e => haystack.includes(e.toLowerCase())).length;
+    // Extract filename and URL path for deeper analysis
+    let filename = '';
+    let urlPath = '';
+    try {
+        const url = new URL(result.imageUrl || result.url || '');
+        filename = (url.pathname.split('/').pop() || '').toLowerCase();
+        urlPath = url.pathname.toLowerCase();
+    } catch (e) {
+        // If URL parsing fails, try basic extraction
+        const urlStr = result.imageUrl || result.url || '';
+        filename = urlStr.split('/').pop()?.toLowerCase() || '';
+        urlPath = urlStr.toLowerCase();
+    }
     
-    // Both entities mentioned = huge boost
-    if (entityMatches >= 2) {
+    // Create comprehensive search context including filename analysis
+    const filenameContext = filename.replace(/[-_]/g, ' ').replace(/\.(jpg|jpeg|png|webp|gif|bmp|tiff|svg)(\?.*)?$/, '');
+    const urlContext = urlPath.replace(/[-_]/g, ' ');
+    const fullContext = `${haystack} ${filenameContext} ${urlContext}`;
+    
+    let score = 0;
+    const entityMatches = entities.filter(e => fullContext.includes(e.toLowerCase())).length;
+    
+    // AGGRESSIVE COLLABORATION DETECTION: Check for both entities in filename/URL
+    const entitiesInFilename = entities.filter(e => filenameContext.includes(e.toLowerCase())).length;
+    const entitiesInUrlPath = entities.filter(e => urlContext.includes(e.toLowerCase())).length;
+    
+    // HIGHEST PRIORITY: Both entities in filename or URL path (true collaboration indicators)
+    if (entitiesInFilename >= 2 || entitiesInUrlPath >= 2) {
+        score += 200; // Massive boost for filename/URL collaboration evidence
+        console.log(`[BTrust] FILENAME/URL COLLABORATION found: ${filename || urlPath} contains both entities`);
+    }
+    // SECOND PRIORITY: Both entities mentioned anywhere in metadata
+    else if (entityMatches >= 2) {
         score += 100;
         
         // Extra boost for collaboration keywords
-        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
+        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(fullContext)) {
             score += 50;
         }
         
         // Photo context boost
-        if (/\b(photo|picture|image|shot|pic)\b/i.test(haystack)) {
+        if (/\b(photo|picture|image|shot|pic)\b/i.test(fullContext)) {
             score += 20;
         }
         
         // Event context boost  
-        if (/\b(concert|performance|show|event|festival|tour)\b/i.test(haystack)) {
+        if (/\b(concert|performance|show|event|festival|tour)\b/i.test(fullContext)) {
             score += 30;
         }
-    } else if (entityMatches === 1) {
-        // Single entity gets decent score
+    } 
+    // LOWER PRIORITY: Single entity but with strong collaboration context
+    else if (entityMatches === 1) {
+        // Base score for single entity
         score += 25;
         
         // Boost single entity with collaboration context
-        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
+        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(fullContext)) {
             score += 20;
         }
+        
+        // Additional boost if the other entity appears in any form (partial matches)
+        const otherEntity = entities.find(e => !fullContext.includes(e.toLowerCase()));
+        if (otherEntity) {
+            const entityParts = otherEntity.toLowerCase().split(' ');
+            const hasPartialMatch = entityParts.some(part => part.length > 2 && fullContext.includes(part));
+            if (hasPartialMatch) {
+                score += 15;
+                console.log(`[BTrust] Partial entity match found for: ${otherEntity}`);
+            }
+        }
+    }
+    
+    // Penalty for results with no entity matches (shouldn't happen but safety check)
+    if (entityMatches === 0) {
+        score -= 50;
     }
     
     // ADD HI-RES SCORE to collaboration score
@@ -144,8 +190,33 @@ export function filterAndScoreResults(results, maxResults = 20) {
             _hiResScore: getHiResScore(result)
         }));
         
-        // ULTRA HI-RES filtering - only accept high resolution images
-        const hiResResults = scoredResults.filter(result => {
+        // AGGRESSIVE COLLABORATION FILTERING: Apply minimum collaboration threshold
+        let collaborationResults = scoredResults.filter(result => {
+            // STRICT COLLABORATION REQUIREMENT: Must have meaningful collaboration score
+            const collabScore = result._collaborationScore || 0;
+            const hiResScore = result._hiResScore || 0;
+            
+            // Minimum collaboration score threshold (before hi-res bonus)
+            // This ensures we only show results that actually relate to BOTH entities
+            const collaborationScoreOnly = collabScore - hiResScore;
+            return collaborationScoreOnly >= 75; // Minimum threshold for collaboration relevance
+        });
+        
+        console.log(`[BTrust] AGGRESSIVE collaboration filtering: ${collaborationResults.length} results meet collaboration threshold`);
+        
+        // If too few results with strict collaboration, relax to medium threshold
+        if (collaborationResults.length < 5) {
+            console.log(`[BTrust] Relaxing collaboration threshold due to limited results`);
+            collaborationResults = scoredResults.filter(result => {
+                const collabScore = result._collaborationScore || 0;
+                const hiResScore = result._hiResScore || 0;
+                const collaborationScoreOnly = collabScore - hiResScore;
+                return collaborationScoreOnly >= 40; // Relaxed threshold
+            });
+        }
+        
+        // Apply HI-RES filtering to collaboration results
+        const hiResResults = collaborationResults.filter(result => {
             // English content only
             if (!isEnglishContent(result.title, result.snippet)) return false;
             

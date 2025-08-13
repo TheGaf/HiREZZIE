@@ -94,23 +94,27 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
                 const [entity1, entity2] = collaboration.entities.slice(0, 2); // Take first two
                 
                 // Create multiple query variants optimized for finding collaborations
+                // Order is important - most specific first
                 searchQueries = [
-                    `"${entity1}" "${entity2}"`, // Quoted for exact matching
-                    `"${entity1} and ${entity2}"`, // Explicit collaboration
-                    `"${entity1} with ${entity2}"`, // With variant
-                    `${entity1} ${entity2} collaboration`, // Collaboration keyword
-                    `${entity1} ${entity2} duet`, // Duet keyword
+                    `"${entity1}" "${entity2}"`, // Most specific: both names quoted
+                    `"${entity1} and ${entity2}"`, // Explicit collaboration with quotes
+                    `"${entity1} with ${entity2}"`, // With variant with quotes
+                    `"${entity1}" "${entity2}" together`, // Together context
+                    `"${entity1}" "${entity2}" collaboration`, // Collaboration keyword
+                    `"${entity1}" "${entity2}" photo`, // Photo context
+                    `"${entity1}" "${entity2}" concert`, // Concert context
+                    `"${entity1}" "${entity2}" performance`, // Performance context
+                    `${entity1} ${entity2} duet`, // Duet keyword (unquoted for broader match)
                     `${entity1} ${entity2} featuring`, // Featuring keyword
-                    `${entity1} ${entity2} together`, // Together keyword
-                    `${entity1} ${entity2} performance`, // Performance keyword
-                    `${entity1} ${entity2} concert`, // Concert keyword
-                    `${entity1} ${entity2} photo`, // Photo keyword
-                    `${entity1} ${entity2} song`, // Song keyword
+                    `${entity1} ${entity2} collab`, // Informal collaboration
+                    `${entity1} ${entity2} "music video"`, // Music video context
+                    `${entity1} ${entity2} interview`, // Interview context
+                    `${entity1} ${entity2} event`, // Event context
                     collaboration.hasExplicitCollaborationWords ? query : `${entity1} and ${entity2}`, // Enhanced original
                     query // Original as final fallback
                 ];
                 
-                console.log(`[BSearch] Using collaboration-focused queries:`, searchQueries.slice(0, 6));
+                console.log(`[BSearch] Using enhanced collaboration queries:`, searchQueries.slice(0, 8));
             }
             
             // Use the most specific query for API calls
@@ -121,16 +125,27 @@ async function searchCategory(category, query, apiKeys, searchConfig, offset = 0
             try {
                 if (collaboration.isCollaboration && collaboration.entities.length >= 2) {
                     const [a, b] = collaboration.entities;
-                    // Special handling for known ambiguous cases
+                    // Special handling for known artist pairs with enhanced context
                     if ((a.includes('jordan') && b.includes('pippen')) || (a.includes('pippen') && b.includes('jordan'))) {
                         apiQuery = '"Michael Jordan" "Scottie Pippen"';
                         if (/\bgame\b|\bbulls\b/i.test(query)) apiQuery += ' (game OR Bulls)';
                     } else if ((a.includes('laufey') && b.includes('clairo')) || (a.includes('clairo') && b.includes('laufey'))) {
-                        // Special handling for Laufey + Clairo collaboration
+                        // Enhanced handling for Laufey + Clairo collaboration with multiple query attempts
                         apiQuery = '"Laufey" "Clairo"';
+                        // Add collaboration context for better results
+                        if (!/\b(concert|performance|show|together)\b/i.test(query)) {
+                            apiQuery += ' (together OR collaboration OR concert)';
+                        }
                     } else {
-                        // General collaboration query enhancement
-                        apiQuery = `"${a}" "${b}"`;
+                        // General collaboration query enhancement with better structure
+                        const cleanA = a.trim();
+                        const cleanB = b.trim();
+                        apiQuery = `"${cleanA}" "${cleanB}"`;
+                        
+                        // Add collaboration context if not already present
+                        if (!/\b(and|with|featuring|together|collaboration)\b/i.test(query)) {
+                            apiQuery += ' (together OR with)';
+                        }
                     }
                 }
             } catch (e) {
