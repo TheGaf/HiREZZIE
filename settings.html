@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hiREZZIE Settings</title>
+  <style>
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      padding: 40px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #59DCFF;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .section {
+      background: #1a1a1a;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .section h3 {
+      color: #59DCFF;
+      margin-top: 0;
+    }
+    .field {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #ccc;
+    }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #333;
+      border-radius: 5px;
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    input:focus {
+      outline: none;
+      border-color: #59DCFF;
+    }
+    .save-btn {
+      background: #59DCFF;
+      color: #000;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 5px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+    }
+    .save-btn:hover {
+      background: #40B0FF;
+    }
+    .status {
+      text-align: center;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    .success {
+      color: #00FF33;
+    }
+    .error {
+      color: #FF6B6B;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      color: #ccc;
+    }
+    .free-note {
+      color: #00FF33;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>hiREZZIE Settings</h1>
+  
+  <div class="info">
+    <strong>API Keys are optional!</strong> hiREZZIE works with free sources (Bing, Yahoo) by default. 
+    Add API keys below to get more high-quality results from Google and other premium sources.
+  </div>
+  
+  <div class="section">
+    <h3>Google Custom Search (Recommended)</h3>
+    <div class="field">
+      <label for="googleApiKey">Google API Key:</label>
+      <input type="password" id="googleApiKey" placeholder="AIzaSy...">
+      <div class="free-note">Get free at: console.cloud.google.com</div>
+    </div>
+    <div class="field">
+      <label for="googleCx">Google Custom Search Engine ID:</label>
+      <input type="text" id="googleCx" placeholder="017576662512468239146:...">
+      <div class="free-note">Get free at: programmablesearchengine.google.com</div>
+    </div>
+  </div>
+  
+  <div class="section">
+    <h3>Premium Sources (Optional)</h3>
+    <div class="field">
+      <label for="serpapiKey">SerpApi Key:</label>
+      <input type="password" id="serpapiKey" placeholder="Your SerpApi key...">
+      <div class="free-note">100 free searches/month at: serpapi.com</div>
+    </div>
+    <div class="field">
+      <label for="braveKey">Brave Search API Key:</label>
+      <input type="password" id="braveKey" placeholder="Your Brave API key...">
+      <div class="free-note">2000 free requests/month at: api.search.brave.com</div>
+    </div>
+  </div>
+  
+  <button id="saveBtn" class="save-btn">Save Settings</button>
+  <div id="status" class="status"></div>
+  
+  <script src="settings.js"></script>
+</body>
+</html>
