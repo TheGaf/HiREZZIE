@@ -1,0 +1,11 @@
+{
+  "name": "hirezzie",
+  "version": "1.0.0",
+  "description": "High-resolution image finder extension",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && echo 'Extension built for development'"
+  },
+  "devDependencies": {},
+  "private": true
+}
