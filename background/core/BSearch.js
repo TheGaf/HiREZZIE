@@ -3,6 +3,7 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { filterAndScoreResults, resetDuplicateCache } from './BTrust.js';
 
 let seenImages = new Set();
 
@@ -86,6 +87,9 @@ async function searchImages(query, apiKeys, offset = 0) {
         if (!image.imageUrl) image.imageUrl = image.url;
         if (!image.thumbnail) image.thumbnail = image.imageUrl;
         
+        // Add query to image for disambiguation in BTrust
+        image._query = query;
+        
         const imageUrl = image.imageUrl?.toLowerCase();
         if (!imageUrl || seenImages.has(imageUrl)) continue;
         
@@ -122,6 +126,7 @@ async function searchImages(query, apiKeys, offset = 0) {
 export async function performSearch(query, categories, settings, offset = 0) {
     if (offset === 0) {
         resetCache();
+        resetDuplicateCache(); // Reset BTrust cache for new searches
     }
     
     const results = {};
@@ -129,8 +134,12 @@ export async function performSearch(query, categories, settings, offset = 0) {
     if (categories.includes('images')) {
         try {
             const images = await searchImages(query, settings.apiKeys, offset);
-            results.images = images;
-            console.log(`[BSearch] Returning ${images.length} images`);
+            // Add category for BTrust processing
+            const imagesWithCategory = images.map(img => ({ ...img, category: 'images' }));
+            // Apply celebrity disambiguation filtering
+            const filteredImages = filterAndScoreResults(imagesWithCategory, 50); // Allow more results for filtering
+            results.images = filteredImages;
+            console.log(`[BSearch] Returning ${filteredImages.length} filtered and scored images`);
         } catch (error) {
             console.error('[BSearch] Image search failed:', error);
             results.images = [];
@@ -142,7 +151,11 @@ export async function performSearch(query, categories, settings, offset = 0) {
 
 export async function loadMoreResults(query, category, settings, offset) {
     if (category === 'images') {
-        return await searchImages(query, settings.apiKeys, offset);
+        const images = await searchImages(query, settings.apiKeys, offset);
+        // Add category for BTrust processing
+        const imagesWithCategory = images.map(img => ({ ...img, category: 'images' }));
+        // Apply celebrity disambiguation filtering
+        return filterAndScoreResults(imagesWithCategory, 20);
     }
     return [];
 }
