@@ -20,6 +20,35 @@ function resetSeenResults() {
     console.log('[BSearch] Reset seen results cache');
 }
 
+// Rate limiting for OG requests
+const ogRequestQueue = [];
+let ogProcessing = false;
+
+async function processOGQueue() {
+    if (ogProcessing || ogRequestQueue.length === 0) return;
+    ogProcessing = true;
+    
+    while (ogRequestQueue.length > 0) {
+        const { result, resolve, reject } = ogRequestQueue.shift();
+        try {
+            const og = await fetchOpenGraphData(result.url);
+            resolve(og);
+        } catch (e) {
+            reject(e);
+        }
+        // Wait 100ms between requests to avoid rate limits
+        await new Promise(r => setTimeout(r, 100));
+    }
+    ogProcessing = false;
+}
+
+function queueOGRequest(result) {
+    return new Promise((resolve, reject) => {
+        ogRequestQueue.push({ result, resolve, reject });
+        processOGQueue();
+    });
+}
+
 function simpleFilter(results, maxResults = 50) {
     if (!results || results.length === 0) {
         return [];
@@ -181,36 +210,35 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 _query: query 
             }));
             
-            // For images, aggressively extract direct image URLs
+            // For images, selectively extract direct image URLs (rate limited)
             if (category === 'images') {
-                console.log(`[BSearch] Extracting direct image URLs from ${resultsWithMeta.length} results...`);
+                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results...`);
                 
-                for (const result of resultsWithMeta) {
-                    // If it's not already a direct image URL, extract from page
-                    const isDirectImage = result.imageUrl && result.imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
-                    
-                    if (!isDirectImage && result.url) {
-                        try {
-                            console.log(`[BSearch] Extracting OG data from: ${result.url}`);
-                            const og = await fetchOpenGraphData(result.url);
-                            if (og?.image) {
-                                console.log(`[BSearch] Found OG image: ${og.image}`);
-                                result.imageUrl = og.image;
-                                result.thumbnail = og.image;
-                                result.ogTitle = og.title;
-                                result.ogDescription = og.description;
-                                result.ogAlt = og.alt;
-                            }
-                        } catch (e) {
-                            console.warn(`[BSearch] OG extraction failed for ${result.url}:`, e.message);
-                            // If OG fails, try to use the original URL if it looks like an image
-                            if (result.url && result.url.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
-                                result.imageUrl = result.url;
-                            }
+                // Only try OG extraction for non-image URLs and limit to top 10 results
+                const needsOG = resultsWithMeta
+                    .filter(result => !result.imageUrl?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i))
+                    .slice(0, 10); // Limit to prevent rate limiting
+                
+                for (const result of needsOG) {
+                    try {
+                        const og = await queueOGRequest(result);
+                        if (og?.image) {
+                            result.imageUrl = og.image;
+                            result.thumbnail = og.image;
+                            result.ogTitle = og.title;
+                            result.ogDescription = og.description;
+                            result.ogAlt = og.alt;
+                        }
+                    } catch (e) {
+                        // Silently handle OG failures
+                        if (result.url?.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+                            result.imageUrl = result.url;
                         }
                     }
-                    
-                    // Ensure all image results have imageUrl
+                }
+                
+                // Ensure all results have imageUrl
+                for (const result of resultsWithMeta) {
                     if (!result.imageUrl) {
                         result.imageUrl = result.url;
                     }
@@ -219,7 +247,7 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                     }
                 }
                 
-                console.log(`[BSearch] Completed OG extraction for images`);
+                console.log(`[BSearch] Completed processing images`);
             }
             
             // Simple filtering - accept almost everything but prioritize co-occurrence
@@ -249,37 +277,6 @@ export async function loadMoreResults(query, category, settings, offset, options
             category, 
             _query: query 
         }));
-        
-        // Extract image URLs for load more too
-        if (category === 'images') {
-            for (const result of resultsWithMeta) {
-                const isDirectImage = result.imageUrl && result.imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
-                
-                if (!isDirectImage && result.url) {
-                    try {
-                        const og = await fetchOpenGraphData(result.url);
-                        if (og?.image) {
-                            result.imageUrl = og.image;
-                            result.thumbnail = og.image;
-                            result.ogTitle = og.title;
-                            result.ogDescription = og.description;
-                            result.ogAlt = og.alt;
-                        }
-                    } catch (e) {
-                        if (result.url && result.url.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
-                            result.imageUrl = result.url;
-                        }
-                    }
-                }
-                
-                if (!result.imageUrl) {
-                    result.imageUrl = result.url;
-                }
-                if (!result.thumbnail) {
-                    result.thumbnail = result.imageUrl || result.url;
-                }
-            }
-        }
         
         const filtered = simpleFilter(resultsWithMeta, 30);
         console.log(`[BSearch] LoadMore completed: ${filtered.length} results`);
