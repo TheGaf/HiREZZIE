@@ -13,7 +13,23 @@ function resetCache() {
 function isValidImage(result) {
     const imageUrl = result.imageUrl || result.url;
     if (!imageUrl) return false;
-    return imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
+    
+    // Check for valid image file extension
+    if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
+        return false;
+    }
+    
+    // Check minimum dimensions: 1500px on one side
+    const width = Number(result.width || 0);
+    const height = Number(result.height || 0);
+    const bigEnough = width >= 1500 || height >= 1500;
+    
+    // Check minimum file size: 1MB
+    const byteSize = Number(result.byteSize || 0);
+    const fatEnough = byteSize >= 1_000_000;
+    
+    // Pass if either dimension or file size requirements are met
+    return bigEnough || fatEnough;
 }
 
 async function searchImages(query, apiKeys, offset = 0) {

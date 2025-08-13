@@ -43,8 +43,8 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
 
     // Filter for large images only
     items = items.filter(it => {
-      const bigEnough = (it.width && it.width >= 1000) || (it.height && it.height >= 1000);
-      const fatEnough = it.byteSize && it.byteSize >= 500_000;
+      const bigEnough = (it.width && it.width >= 1500) || (it.height && it.height >= 1500);
+      const fatEnough = it.byteSize && it.byteSize >= 1_000_000;
       return bigEnough || fatEnough;
     });
 

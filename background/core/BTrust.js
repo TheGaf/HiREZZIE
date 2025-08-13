@@ -116,9 +116,10 @@ export function filterAndScoreResults(results, maxResults = 20) {
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const pixelCount = w * h;
-            // Boost if >= 4MP; stronger boost >= 8MP
-            if (pixelCount >= 8_000_000) scoreBoost += 2;
-            else if (pixelCount >= 4_000_000) scoreBoost += 1;
+            // Boost if >= 2MP; stronger boost >= 4MP; strongest boost >= 8MP
+            if (pixelCount >= 8_000_000) scoreBoost += 3;
+            else if (pixelCount >= 4_000_000) scoreBoost += 2;
+            else if (pixelCount >= 2_000_000) scoreBoost += 1;
 
             // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
             const query = (result._query || '').toLowerCase();
