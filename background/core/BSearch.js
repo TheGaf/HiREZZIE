@@ -41,16 +41,31 @@ function detectCollaborationIntent(query) {
     const hasTwoDistinctNames = hasMultipleWords && spaceEntities.length === 2 && 
         spaceEntities.every(word => word[0] === word[0].toUpperCase());
     
-    const isCollaboration = hasMultipleEntities || hasCollaborationKeywords || 
-                           likelyMultipleArtists || hasCommonCollaborationContext || hasTwoDistinctNames;
+    // Special handling for multi-word names (like "Taylor Swift Travis Kelce")
+    const hasThreeOrMoreCapitalizedWords = capitalizedWords.length >= 3;
+    
+    // Common single person names to exclude from collaboration detection
+    const commonSinglePersonNames = ['michael jordan', 'lebron james', 'kobe bryant', 'stephen curry', 'tom brady'];
+    const isSinglePersonName = commonSinglePersonNames.includes(normalized);
+    
+    const isCollaboration = !isSinglePersonName && (hasMultipleEntities || hasCollaborationKeywords || 
+                           likelyMultipleArtists || hasCommonCollaborationContext || 
+                           hasTwoDistinctNames || hasThreeOrMoreCapitalizedWords);
     
     // Use the most specific entity split available
     let finalEntities;
     if (hasMultipleEntities) {
         finalEntities = entities;
-    } else if (likelyMultipleArtists && capitalizedWords.length === 2) {
+    } else if (hasThreeOrMoreCapitalizedWords && capitalizedWords.length >= 3) {
+        // For cases like "Taylor Swift Travis Kelce", split into pairs
+        const midpoint = Math.ceil(capitalizedWords.length / 2);
+        finalEntities = [
+            capitalizedWords.slice(0, midpoint).join(' '), 
+            capitalizedWords.slice(midpoint).join(' ')
+        ];
+    } else if (likelyMultipleArtists && capitalizedWords.length === 2 && !isSinglePersonName) {
         finalEntities = capitalizedWords;
-    } else if (hasTwoDistinctNames) {
+    } else if (hasTwoDistinctNames && !isSinglePersonName) {
         finalEntities = spaceEntities;
     } else {
         finalEntities = [normalized];
@@ -64,7 +79,8 @@ function detectCollaborationIntent(query) {
         hasCollaborationKeywords,
         likelyMultipleArtists,
         hasCommonCollaborationContext,
-        hasTwoDistinctNames
+        hasTwoDistinctNames,
+        hasThreeOrMoreCapitalizedWords: capitalizedWords.length >= 3
     });
     
     return {
