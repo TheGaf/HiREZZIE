@@ -64,7 +64,7 @@ function getHiResScore(result) {
     else if (megaPixels >= 12) score += 200;  // 12MP+ = Modern phone quality
     else if (megaPixels >= 8) score += 100;   // 8MP+ = Decent quality
     else if (megaPixels >= 4) score += 50;    // 4MP+ = Minimum acceptable
-    else if (megaPixels >= 2) score += 10;    // 2MP+ = Low quality
+    else if (megaPixels >= .5) score += 10;    // 2MP+ = Low quality
     // Under 2MP gets 0 points
     
     // Bonus for specific high-res dimensions
