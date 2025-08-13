@@ -15,16 +15,23 @@ function isValidImage(result) {
     if (!imageUrl) return false;
     if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) return false;
     
-    // NEW: Slightly higher standards
+    // SMART HI-RES: Focus on actual photo quality
     const w = Number(result.width || 0);
     const h = Number(result.height || 0);
     const bytes = Number(result.byteSize || 0);
     
-    // Must be at least 1500px on one side OR 1MB+ file
-    const bigEnough = (w >= 1500) || (h >= 1500);
-    const fatEnough = bytes >= 1_000_000; // 1MB instead of 500KB
+    // High-res means: decent resolution OR substantial file size OR unknown (let it through)
+    const goodResolution = (w >= 1000) || (h >= 1000);
+    const goodFileSize = bytes >= 500_000; // 500KB+ suggests quality
+    const unknownSize = (w === 0 && h === 0) || (bytes === 0); // Don't filter unknowns
     
-    return bigEnough || fatEnough;
+    // Block obvious thumbnails/icons
+    const tooSmall = (w > 0 && w < 300) || (h > 0 && h < 300);
+    const tinyFile = (bytes > 0 && bytes < 50_000); // Under 50KB is likely thumbnail
+    
+    if (tooSmall || tinyFile) return false;
+    
+    return goodResolution || goodFileSize || unknownSize;
 }
 
 async function searchImages(query, apiKeys, offset = 0) {
@@ -90,16 +97,23 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
-    // Sort by size (largest first) with 2MP+ boost
+    // Sort by quality: prioritize known large images, then file size, then unknown sizes
     validImages.sort((a, b) => {
         const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
         const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+        const aBytes = Number(a.byteSize || 0);
+        const bBytes = Number(b.byteSize || 0);
         
-        // Boost for 2MP+ images
-        const aBoost = aPixels >= 2_000_000 ? 1000000 : 0;
-        const bBoost = bPixels >= 2_000_000 ? 1000000 : 0;
+        // Massive quality boost for 2MP+ images
+        const aQuality = aPixels >= 2_000_000 ? aPixels + 10_000_000 : aPixels;
+        const bQuality = bPixels >= 2_000_000 ? bPixels + 10_000_000 : bPixels;
         
-        return (bPixels + bBoost) - (aPixels + aBoost);
+        // If similar quality, prefer larger file size
+        if (Math.abs(aQuality - bQuality) < 500_000) {
+            return bBytes - aBytes;
+        }
+        
+        return bQuality - aQuality;
     });
     
     return validImages;
