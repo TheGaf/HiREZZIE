@@ -4,6 +4,7 @@ import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
 import { disambiguateCelebrityResults, shouldApplyDisambiguation } from '../utils/CelebrityDisambiguation.js';
+import { filterAndScoreResults } from './BTrust.js';
 
 let seenImages = new Set();
 
@@ -148,8 +149,16 @@ export async function performSearch(query, categories, settings, offset = 0) {
     if (categories.includes('images')) {
         try {
             const images = await searchImages(query, settings.apiKeys, offset);
-            results.images = images;
-            console.log(`[BSearch] Returning ${images.length} images`);
+            
+            // Apply BTrust filtering and scoring to enhance the results
+            const trustedImages = filterAndScoreResults(images.map(img => ({
+                ...img,
+                category: 'images',
+                url: img.imageUrl || img.url
+            })), 50); // Allow more results for further filtering
+            
+            results.images = trustedImages;
+            console.log(`[BSearch] Returning ${trustedImages.length} images after BTrust filtering`);
         } catch (error) {
             console.error('[BSearch] Image search failed:', error);
             results.images = [];
@@ -161,7 +170,14 @@ export async function performSearch(query, categories, settings, offset = 0) {
 
 export async function loadMoreResults(query, category, settings, offset) {
     if (category === 'images') {
-        return await searchImages(query, settings.apiKeys, offset);
+        const images = await searchImages(query, settings.apiKeys, offset);
+        
+        // Apply BTrust filtering for load more results too
+        return filterAndScoreResults(images.map(img => ({
+            ...img,
+            category: 'images',
+            url: img.imageUrl || img.url
+        })), 20);
     }
     return [];
 }
