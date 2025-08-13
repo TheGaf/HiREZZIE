@@ -29,8 +29,8 @@ const DEFAULT_SETTINGS = {
     searchConfig: {
         newsFreshnessDays: 90,
         maxResultsPerCategory: 50,
-            preferGoogleCSE: true,
-            usePaidImageAPIs: false,
+        preferGoogleCSE: true,
+        usePaidImageAPIs: false,
         minImageMegaPixels: 4,
         requireAllTerms: true
     }
@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
 
 export async function getSettings() {
     return new Promise((resolve) => {
-        chrome.storage.local.get(['apiKeys', 'searchConfig'], (result) => {
+        chrome.storage.sync.get(['apiKeys', 'searchConfig'], (result) => {
             const settings = {
                 apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...result.apiKeys },
                 searchConfig: { ...DEFAULT_SETTINGS.searchConfig, ...result.searchConfig }
@@ -50,7 +50,7 @@ export async function getSettings() {
 
 export async function saveSettings(settings) {
     return new Promise((resolve) => {
-        chrome.storage.local.set(settings, () => {
+        chrome.storage.sync.set(settings, () => {
             resolve();
         });
     });
