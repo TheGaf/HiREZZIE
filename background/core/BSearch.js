@@ -89,12 +89,12 @@ async function validateImageQuality(result) {
     }
 }
 
-function relevanceFirstFilter(results, maxResults = 50) { // ← INCREASED FROM 25 TO 50
+function relevanceFirstFilter(results, maxResults = 50) {
     if (!results || results.length === 0) {
         return [];
     }
 
-    console.log(`[BSearch] Processing ${results.length} raw results with RELEVANCE PRIORITY (TOP ${maxResults})`);
+    console.log(`[BSearch] Processing ${results.length} raw results with SIMPLE OR LOGIC (like Google Images)`);
     
     // Only filter out exact URL duplicates
     const uniqueResults = results.filter(result => {
@@ -110,102 +110,81 @@ function relevanceFirstFilter(results, maxResults = 50) { // ← INCREASED FROM 
     
     console.log(`[BSearch] After deduplication: ${uniqueResults.length} results`);
     
-    // SMART RELEVANCE SCORING - Detect query type
+    // SIMPLE OR LOGIC - Just like Google Images!
     const scoredResults = uniqueResults.map(result => {
         let score = 0;
         
         const query = (result._query || '').toLowerCase();
-        const entities = query.split(/\s+(?:and|&|vs|x|with|,|\+)\s+/g).map(s => s.trim()).filter(Boolean);
         
-        // DETECT IF THIS IS A PEOPLE/ARTISTS QUERY
-        const isPeopleQuery = entities.length >= 2 && entities.every(entity => {
-            const words = entity.split(/\s+/);
-            const hasCapitalizedWords = words.some(w => /^[A-Z][a-z]+$/.test(w));
-            const isShortName = words.length <= 3;
-            const hasCommonNamePattern = /^[a-z]+\s+[a-z]+$/i.test(entity) || /^[a-z]+$/i.test(entity);
-            return hasCapitalizedWords || (isShortName && hasCommonNamePattern);
-        });
+        // Split query into individual search terms
+        const searchTerms = query.split(/\s+/).filter(Boolean);
         
-        if (entities.length > 1) {
-            const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
-            
-            const entityMatches = entities.filter(e => hay.includes(e)).length;
-            
-            if (isPeopleQuery) {
-                // PEOPLE/ARTISTS: High score for ANY entity match (OR logic)
-                if (entityMatches >= 1) {
-                    score += 80; // High score for featuring any artist
-                    console.log(`[BSearch] ARTIST MATCH: "${result.title}" mentions ${entityMatches}/${entities.length} artists`);
-                }
-                
-                // MEGA BONUS for rare collaborations (both artists together)
-                if (entityMatches === entities.length) {
-                    score += 50; // Extra bonus for collaboration
-                    console.log(`[BSearch] RARE COLLABORATION: "${result.title}" mentions ALL artists: ${entities.join(', ')}`);
-                }
-            } else {
-                // NON-PEOPLE: Keep original AND logic (require all terms)
-                if (entityMatches === entities.length) {
-                    score += 100; // MASSIVE boost for true co-occurrence
-                    console.log(`[BSearch] PERFECT RELEVANCE: "${result.title}" mentions all entities: ${entities.join(', ')}`);
-                }
-                else if (entityMatches >= 2) {
-                    score += 50; // Strong boost for 2+ entities
-                }
-                else if (entityMatches === 1) {
-                    score += 20; // Moderate boost for 1 entity
-                }
-            }
-            
-            // Extra boost for collaboration keywords
-            const collabKeywords = ['together', 'collaboration', 'collab', 'with', 'featuring', 'feat', 'and', '&', 'vs', 'interview', 'podcast', 'hot ones'];
-            const collabMatches = collabKeywords.filter(kw => hay.includes(kw)).length;
-            if (collabMatches > 0) {
-                score += collabMatches * 10;
-            }
-        } else {
-            // Single entity queries
-            const hay = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
-            
-            const queryMatches = (hay.match(new RegExp(query, 'gi')) || []).length;
-            if (queryMatches >= 2) {
-                score += 30; // Multiple mentions
-            } else if (queryMatches === 1) {
-                score += 15; // Single mention
-            }
-            
-            // Title matches are extra important
-            if ((result.title || '').toLowerCase().includes(query)) {
-                score += 25;
+        console.log(`[BSearch] Search terms: [${searchTerms.join(', ')}]`);
+        
+        // Check all available text fields for ANY search term (OR logic)
+        const haystack = `${result.title || ''} ${result.snippet || ''} ${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
+        
+        // Count matches for each search term
+        let termMatches = 0;
+        let totalMatches = 0;
+        
+        for (const term of searchTerms) {
+            const matches = (haystack.match(new RegExp(term, 'gi')) || []).length;
+            if (matches > 0) {
+                termMatches++;
+                totalMatches += matches;
+                console.log(`[BSearch] Found "${term}" ${matches} times in "${result.title}"`);
             }
         }
         
-        // MINOR resolution boosts (much smaller than relevance)
+        // SIMPLE SCORING - Google Images style
+        if (termMatches > 0) {
+            // Base score for having ANY search term
+            score += 50;
+            
+            // Bonus for multiple term matches
+            score += (termMatches - 1) * 20;
+            
+            // Bonus for multiple occurrences
+            score += Math.min(totalMatches * 5, 25);
+            
+            // Extra bonus for title matches
+            const titleMatches = searchTerms.filter(term => 
+                (result.title || '').toLowerCase().includes(term)
+            ).length;
+            
+            if (titleMatches > 0) {
+                score += titleMatches * 15;
+            }
+            
+            console.log(`[BSearch] "${result.title}" RELEVANCE SCORE: ${score} (${termMatches}/${searchTerms.length} terms matched)`);
+        } else {
+            console.log(`[BSearch] "${result.title}" NO MATCHES - RELEVANCE SCORE: 0`);
+        }
+        
+        // Small resolution boosts (much smaller than relevance)
         if (result.category === 'images') {
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const pixelCount = w * h;
             const bytes = Number(result.byteSize || 0);
             
-            // Small boosts for verified high-res (secondary to relevance)
-            if (pixelCount >= 8_000_000) score += 5;      // 8MP+ 
-            else if (pixelCount >= 4_000_000) score += 4; // 4MP+
-            else if (pixelCount >= 2_000_000) score += 3; // 2MP+
-            else if (w >= 1000 || h >= 1000) score += 2;  // 1000px+
-            else if (w >= 600 || h >= 600) score += 1;    // 600px+
+            // Tiny boosts for verified high-res (secondary to relevance)
+            if (pixelCount >= 8_000_000) score += 3;      // 8MP+ 
+            else if (pixelCount >= 4_000_000) score += 2; // 4MP+
+            else if (pixelCount >= 2_000_000) score += 1; // 2MP+
             
-            if (bytes >= 3_000_000) score += 3;           // 3MB+
-            else if (bytes >= 1_000_000) score += 2;      // 1MB+
-            else if (bytes >= 500_000) score += 1;        // 500KB+
+            if (bytes >= 3_000_000) score += 2;           // 3MB+
+            else if (bytes >= 1_000_000) score += 1;      // 1MB+
         }
         
         return { ...result, _score: score };
     });
     
-    // Sort by score (highest first)
+    // Sort by relevance score (highest first)
     scoredResults.sort((a, b) => (b._score || 0) - (a._score || 0));
     
-    const final = scoredResults.slice(0, maxResults); // TOP 50
+    const final = scoredResults.slice(0, maxResults);
     console.log(`[BSearch] Final results: ${final.length} (TOP ${maxResults})`);
     
     // Log top scoring results
@@ -213,7 +192,7 @@ function relevanceFirstFilter(results, maxResults = 50) { // ← INCREASED FROM 
         const w = result.width || 0;
         const h = result.height || 0;
         const mp = Math.round((w * h) / 1000000);
-        console.log(`[BSearch] Top result #${i+1}: "${result.title}" (RELEVANCE SCORE: ${result._score}, ${w}x${h} ${mp}MP) from ${result.source}`);
+        console.log(`[BSearch] #${i+1}: "${result.title}" (SCORE: ${result._score}, ${w}x${h} ${mp}MP) from ${result.source}`);
     });
     
     return final;
@@ -313,7 +292,7 @@ export async function performSearch(query, categories, settings, offset = 0, opt
             }));
             
             if (category === 'images') {
-                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with RELEVANCE PRIORITY (TOP 50)...`);
+                console.log(`[BSearch] Processing ${resultsWithMeta.length} image results with SIMPLE OR LOGIC (TOP 50)...`);
                 
                 // Extract direct image URLs (rate limited)
                 const needsOG = resultsWithMeta
@@ -368,13 +347,13 @@ export async function performSearch(query, categories, settings, offset = 0, opt
                 
                 console.log(`[BSearch] Quality validation completed: ${qualityResults.length}/${resultsWithMeta.length} passed (ULTRA-RELAXED)`);
                 
-                // Use RELEVANCE-FIRST filtering with TOP 50 limit
+                // Use SIMPLE OR LOGIC filtering with TOP 50 limit
                 allResults[category] = relevanceFirstFilter(qualityResults, 50);
             } else {
                 allResults[category] = relevanceFirstFilter(resultsWithMeta, 50);
             }
             
-            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results (TOP 50 RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] ${category} completed: ${allResults[category].length} results (TOP 50 SIMPLE OR LOGIC)`);
             
         } catch (error) {
             console.error(`[BSearch] ${category} search failed:`, error);
@@ -410,11 +389,11 @@ export async function loadMoreResults(query, category, settings, offset, options
             
             const qualityResults = (await Promise.all(qualityPromises)).filter(Boolean);
             const filtered = relevanceFirstFilter(qualityResults, 50);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results (TOP 50 RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} quality results (TOP 50 SIMPLE OR LOGIC)`);
             return filtered;
         } else {
             const filtered = relevanceFirstFilter(resultsWithMeta, 50);
-            console.log(`[BSearch] LoadMore completed: ${filtered.length} results (TOP 50 RELEVANCE PRIORITIZED)`);
+            console.log(`[BSearch] LoadMore completed: ${filtered.length} results (TOP 50 SIMPLE OR LOGIC)`);
             return filtered;
         }
         
