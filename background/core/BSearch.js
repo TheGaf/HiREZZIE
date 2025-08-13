@@ -91,7 +91,7 @@ function analyzeSourceResults(query, sourceResults) {
         const ratio = term2Total > 0 ? (term1Total / term2Total) : (term1Total > 0 ? 'Infinity' : 'N/A');
         console.log(`[BSearch]   ${term1}:${term2} ratio = ${ratio}`);
         
-        if (typeof ratio === 'number' && (ratio > 3 || ratio < 0.33)) {
+        if ((typeof ratio === 'number' && (ratio > 3 || ratio < 0.33)) || ratio === 'Infinity') {
             console.log(`[BSearch]   ⚠️  BIAS DETECTED: Significant imbalance between "${term1}" and "${term2}"`);
             
             // Identify which sources are most biased
@@ -100,11 +100,21 @@ function analyzeSourceResults(query, sourceResults) {
                 const s2 = stats.termCounts[term2] || 0;
                 const sourceRatio = s2 > 0 ? (s1 / s2) : (s1 > 0 ? 'Infinity' : 'N/A');
                 
-                if (typeof sourceRatio === 'number' && (sourceRatio > 5 || sourceRatio < 0.2)) {
+                if ((typeof sourceRatio === 'number' && (sourceRatio > 5 || sourceRatio < 0.2)) || sourceRatio === 'Infinity') {
                     console.log(`[BSearch]     ${sourceName}: HEAVILY BIASED (${s1}:${s2} = ${sourceRatio})`);
-                } else if (typeof sourceRatio === 'string') {
+                } else if (typeof sourceRatio === 'string' && sourceRatio !== 'N/A') {
                     console.log(`[BSearch]     ${sourceName}: COMPLETE BIAS (${s1}:${s2})`);
                 }
+            }
+            
+            // Suggest query variants for testing
+            console.log('[BSearch] Suggested Query Variants for Testing:');
+            console.log(`[BSearch]   - "${term1}" OR "${term2}"`);
+            console.log(`[BSearch]   - ${term1} ${term2} (no quotes)`);
+            console.log(`[BSearch]   - Individual queries: "${term1}" + "${term2}"`);
+            if (searchTerms.length === 2) {
+                console.log(`[BSearch]   - "${term1}" AND "${term2}"`);
+                console.log(`[BSearch]   - "${term1} ${term2}" (exact phrase)`);
             }
         } else {
             console.log(`[BSearch]   ✅ Good balance between search terms`);
@@ -532,6 +542,20 @@ export async function performSearch(query, categories, settings, offset = 0, opt
     }
 
     console.log('[BSearch] Search completed:', Object.keys(allResults).map(k => `${k}: ${allResults[k].length}`));
+    
+    // Final source distribution summary for images
+    if (allResults.images?.length > 0) {
+        console.log('[BSearch] Final Result Source Distribution:');
+        const finalSourceCount = {};
+        for (const result of allResults.images) {
+            const sourceType = result._sourceType || 'unknown';
+            finalSourceCount[sourceType] = (finalSourceCount[sourceType] || 0) + 1;
+        }
+        for (const [source, count] of Object.entries(finalSourceCount)) {
+            console.log(`[BSearch]   ${source}: ${count} results`);
+        }
+    }
+    
     return allResults;
 }
 
