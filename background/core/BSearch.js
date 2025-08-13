@@ -3,6 +3,7 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { detectCelebritiesInQuery, filterCelebrityResults, enhanceQueryForCelebrities } from '../utils/BCelebrity.js';
 
 let seenImages = new Set();
 
@@ -115,6 +116,18 @@ async function searchImages(query, apiKeys, offset = 0) {
         
         return bQuality - aQuality;
     });
+    
+    // Apply celebrity disambiguation filtering
+    const detectedCelebrities = detectCelebritiesInQuery(query);
+    if (detectedCelebrities.length > 0) {
+        console.log(`[BSearch] Detected celebrities in query "${query}":`, detectedCelebrities.map(c => c.name));
+        const filteredImages = filterCelebrityResults(validImages, detectedCelebrities, {
+            strictMode: true,
+            minScore: 0,
+            maxResults: 50 // Allow more results before final limiting
+        });
+        return filteredImages;
+    }
     
     return validImages;
 }
