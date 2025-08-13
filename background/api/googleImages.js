@@ -1,5 +1,5 @@
 // background/api/googleImages.js
-import { cleanHtml, getDomain, canonicalizeUrl } from '../utils/BUtils.js';
+import { cleanHtml, getDomain, canonicalizeUrl, fetchWithRetry } from '../utils/BUtils.js';
 
 /**
  * Fetch images from Google Programmable Search (Custom Search API).
@@ -21,7 +21,7 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
     + `&imgSize=xxlarge&imgType=photo&safe=off`;
 
   try {
-    const response = await fetch(url);
+    const response = await fetchWithRetry(url);
     if (!response.ok) {
       try {
         const err = await response.json();

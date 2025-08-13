@@ -1,5 +1,5 @@
 // background/api/serpApi.js
-import { cleanHtml, getDomain } from '../utils/BUtils.js';
+import { cleanHtml, getDomain, fetchWithRetry } from '../utils/BUtils.js';
 
 /**
  * Fetches images from SerpApi (using Google Images engine).
@@ -71,7 +71,7 @@ export async function searchSerpApiImages(query, apiKey, offset = 0, options = {
     ];
     for (const tbs of tbsTiers) {
       for (const v of variants.slice(0, 6)) {
-        const response = await fetch(makeUrl(v, tbs));
+        const response = await fetchWithRetry(makeUrl(v, tbs));
         if (!response.ok) {
           console.warn(`[SerpApi] Request failed: ${response.status}`);
           continue;

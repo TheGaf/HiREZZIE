@@ -1,5 +1,5 @@
 // background/api/bing.js
-import { cleanHtml, getDomain } from '../utils/BUtils.js';
+import { cleanHtml, getDomain, fetchWithRetry } from '../utils/BUtils.js';
 
 // Scrape Bing Images HTML (no API) and extract image/page URLs from the iusc "m" JSON
 export async function searchBingImages(query, offset = 0, options = {}) {
@@ -21,7 +21,7 @@ export async function searchBingImages(query, offset = 0, options = {}) {
     params.set('first', String(first));
     const url = `${base}?${params.toString()}`;
 
-    const res = await fetch(url, { credentials: 'omit' });
+    const res = await fetchWithRetry(url, { credentials: 'omit' });
     if (!res.ok) {
       console.warn(`[Bing] HTML fetch failed: ${res.status}`);
       return [];
