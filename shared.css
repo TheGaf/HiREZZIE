@@ -1047,3 +1047,291 @@ body { display: flex; justify-content: center; align-items: flex-start; min-heig
   .search-bar { width: 100% !important; }
   .search-bar input { width: calc(100% - 110px) !important; }
 }
+
+/* Performance Optimizations - Enhanced Animations and Interactions */
+
+/* Optimized animations with will-change and transform3d for GPU acceleration */
+.image-thumb,
+.image-card,
+.skeleton-card,
+.button,
+.search-bar input {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Enhanced skeleton loading with better performance */
+.skeleton-shimmer {
+  background: linear-gradient(90deg, 
+    rgba(16, 16, 20, 0.8) 0%, 
+    rgba(30, 30, 36, 0.9) 50%, 
+    rgba(16, 16, 20, 0.8) 100%);
+  background-size: 200% 100%;
+  animation: shimmerAnimation 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmerAnimation {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Enhanced image loading states */
+.image-thumb.loading {
+  opacity: 1;
+  background: linear-gradient(90deg, #0b0b0d 0%, #2a2a33 50%, #0b0b0d 100%);
+  background-size: 200% 100%;
+  animation: shimmerAnimation 1.5s ease-in-out infinite;
+  transform: translateZ(0); /* Force GPU acceleration */
+}
+
+.image-thumb.loaded {
+  opacity: 1;
+  background: none;
+  animation: none;
+  transform: translateZ(0);
+  transition: opacity 0.3s ease-in-out, transform 0.2s ease-in-out;
+}
+
+.image-thumb.error {
+  opacity: 0.6;
+  background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+  animation: none;
+}
+
+/* Enhanced hover effects with better performance */
+.image-card {
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  transform: translateZ(0);
+}
+
+.image-card:hover {
+  transform: translateY(-2px) translateZ(0);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+.image-link:hover .image-thumb {
+  transform: scale(1.02) translateZ(0);
+}
+
+/* Virtual scrolling container optimizations */
+.virtual-scroll-container {
+  will-change: scroll-position;
+  contain: layout style paint;
+  overflow-anchor: none; /* Prevent scroll anchoring issues */
+}
+
+.virtual-scroll-item {
+  contain: layout style paint;
+  will-change: transform;
+}
+
+/* Progressive loading indicators */
+.loading-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  color: var(--neon-cyan);
+  font-size: 14px;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  border: 2px solid rgba(89, 220, 255, 0.3);
+  border-top: 2px solid var(--neon-cyan);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Enhanced focus states for accessibility */
+.image-link:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* Improved button animations */
+button {
+  transition: all 0.2s ease-in-out;
+  transform: translateZ(0);
+}
+
+button:hover {
+  transform: translateY(-1px) translateZ(0);
+  box-shadow: 0 4px 12px rgba(89, 220, 255, 0.3);
+}
+
+button:active {
+  transform: translateY(0) translateZ(0);
+  transition-duration: 0.1s;
+}
+
+/* Search input enhancements */
+.search-bar input {
+  transition: all 0.2s ease-in-out;
+  transform: translateZ(0);
+}
+
+.search-bar input:focus {
+  transform: translateY(-1px) translateZ(0);
+  box-shadow: 0 4px 12px rgba(89, 220, 255, 0.2);
+}
+
+/* Optimized grid layout for better rendering performance */
+.results-grid {
+  contain: layout style;
+  will-change: contents;
+}
+
+.image-card-container {
+  contain: layout style paint;
+  position: relative;
+}
+
+/* Enhanced skeleton grid for better loading experience */
+.skeleton-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.skeleton-card-enhanced {
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, 
+    rgba(16, 16, 20, 0.8) 0%, 
+    rgba(30, 30, 36, 0.9) 50%, 
+    rgba(16, 16, 20, 0.8) 100%);
+  background-size: 200% 100%;
+  animation: shimmerAnimation 1.5s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-card-enhanced::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  background: rgba(89, 220, 255, 0.1);
+  border-radius: 4px;
+  opacity: 0.3;
+}
+
+/* Performance-optimized responsive design */
+@media (min-width: 1200px) {
+  .skeleton-grid {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  /* Reduce animations on mobile for better performance */
+  .image-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  .image-link:hover .image-thumb {
+    transform: none;
+  }
+  
+  button:hover {
+    transform: none;
+  }
+}
+
+/* Fade-in animations for progressive loading */
+.fade-in {
+  opacity: 0;
+  animation: fadeIn 0.3s ease-in-out forwards;
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+.fade-out {
+  animation: fadeOut 0.3s ease-in-out forwards;
+}
+
+@keyframes fadeOut {
+  to { opacity: 0; }
+}
+
+/* Staggered animations for grid items */
+.image-card:nth-child(1) { animation-delay: 0ms; }
+.image-card:nth-child(2) { animation-delay: 50ms; }
+.image-card:nth-child(3) { animation-delay: 100ms; }
+.image-card:nth-child(4) { animation-delay: 150ms; }
+.image-card:nth-child(5) { animation-delay: 200ms; }
+.image-card:nth-child(6) { animation-delay: 250ms; }
+
+/* Error states */
+.error-message {
+  color: var(--neon-red);
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: var(--radius);
+  padding: 15px;
+  margin: 20px 0;
+  text-align: center;
+}
+
+.no-results {
+  color: var(--muted);
+  text-align: center;
+  padding: 40px 20px;
+  font-size: 16px;
+}
+
+/* Performance monitoring indicator (development) */
+.performance-indicator {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  color: var(--neon-cyan);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  
+  .image-card:hover,
+  .image-link:hover .image-thumb,
+  button:hover {
+    transform: none !important;
+  }
+}
