@@ -113,9 +113,9 @@ function extractCelebrityEntities(query) {
         else if (words.length === 5) {
             entities = [`${words[0]} ${words[1]}`, `${words[2]} ${words[3]}`, words[4]];
         }
-        // For 6 words, assume three full names or two names with middle names
+        // For 6 words, assume three full names: "FirstName LastName FirstName LastName FirstName LastName"
         else if (words.length === 6) {
-            entities = [`${words[0]} ${words[1]}`, `${words[2]} ${words[3]} ${words[4]} ${words[5]}`];
+            entities = [`${words[0]} ${words[1]}`, `${words[2]} ${words[3]}`, `${words[4]} ${words[5]}`];
         }
         else {
             entities = [query]; // Single entity or unclear pattern
