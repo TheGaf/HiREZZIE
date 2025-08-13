@@ -90,17 +90,20 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
-// Sort by size (largest first) with 2MP+ boost
-validImages.sort((a, b) => {
-    const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-    const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+    // Sort by size (largest first) with 2MP+ boost
+    validImages.sort((a, b) => {
+        const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
+        const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+        
+        // Boost for 2MP+ images
+        const aBoost = aPixels >= 2_000_000 ? 1000000 : 0;
+        const bBoost = bPixels >= 2_000_000 ? 1000000 : 0;
+        
+        return (bPixels + bBoost) - (aPixels + aBoost);
+    });
     
-    // Boost for 2MP+ images
-    const aBoost = aPixels >= 2_000_000 ? 1000000 : 0;
-    const bBoost = bPixels >= 2_000_000 ? 1000000 : 0;
-    
-    return (bPixels + bBoost) - (aPixels + aBoost);
-});
+    return validImages;
+}
 
 export async function performSearch(query, categories, settings, offset = 0) {
     if (offset === 0) {
