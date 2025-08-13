@@ -1,34 +1,25 @@
 // background/api/googleImages.js
 import { cleanHtml, getDomain, canonicalizeUrl } from '../utils/BUtils.js';
 
-/**
- * Fetch images from Google Programmable Search (Custom Search API).
- * Uses image search with large sizes and returns normalized results.
- */
 export async function searchGoogleImages(query, apiKey, cx, offset = 0, options = {}) {
   if (!apiKey || !cx) {
     console.warn('[Google Images API] API key or CX is missing.');
     return [];
   }
 
-  const quote = (s) => `"${s}"`;
-  const blacklist = options.blacklist || [];
-  const q = quote(String(query || '').trim()) + (blacklist.length ? ' ' + blacklist.map(d => `-site:${d}`).join(' ') : '');
-  const start = Math.max(1, (offset % 90) + 1); // API allows start up to 91 for num=10
+  // Send query as-is, like Google Images Large
+  const cleanQuery = query.trim();
+  const start = Math.max(1, (offset % 90) + 1);
+  
   const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}`
-    + `&q=${encodeURIComponent(q)}`
+    + `&q=${encodeURIComponent(cleanQuery)}`
     + `&searchType=image&num=10&start=${start}`
     + `&imgSize=xxlarge&imgType=photo&safe=off`;
 
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      try {
-        const err = await response.json();
-        console.warn('[Google Images API] Request failed:', response.status, err?.error?.message || err);
-      } catch {
-        console.warn(`[Google Images API] Request failed: ${response.status}`);
-      }
+      console.warn(`[Google Images API] Request failed: ${response.status}`);
       return [];
     }
 
@@ -50,26 +41,23 @@ export async function searchGoogleImages(query, apiKey, cx, offset = 0, options 
         publishedAt: new Date().toISOString()
       }));
 
-    // Pre-filter by Google-reported dimensions/bytes when present
+    // Filter for large images only
     items = items.filter(it => {
-      const bigEnough = (it.width && it.width >= 2000) || (it.height && it.height >= 2000);
-      const fatEnough = it.byteSize && it.byteSize >= 1_500_000;
+      const bigEnough = (it.width && it.width >= 1000) || (it.height && it.height >= 1000);
+      const fatEnough = it.byteSize && it.byteSize >= 500_000;
       return bigEnough || fatEnough;
     });
 
-    // Dedupe by host+path+size (keep first; later we keep largest after merging sources)
+    // Simple dedup by URL
     const seen = new Set();
     items = items.filter(it => {
-      try {
-        const u = new URL(it.imageUrl);
-        const key = `${u.hostname}${u.pathname}|${it.width || 0}x${it.height || 0}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      } catch { return true; }
+      const key = it.imageUrl.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
-    // Sort by area then byte size
+    // Sort by size
     items.sort((a, b) => {
       const aa = (a.width || 0) * (a.height || 0);
       const bb = (b.width || 0) * (b.height || 0);
