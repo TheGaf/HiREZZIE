@@ -111,14 +111,15 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
       // Send message to background script
       const response = await chrome.runtime.sendMessage({
-        action: 'searchImages',
-        query: currentQuery
+        action: 'search',
+        query: currentQuery,
+        categories: ['images']
       });
       
       hideLoading();
       
-      if (response && response.success) {
-        displayImages(response.images);
+      if (response && response.data && response.data.images) {
+        displayImages(response.data.images);
       } else {
         imageGrid.innerHTML = '<div class="no-results">Search failed. Please try again.</div>';
       }
