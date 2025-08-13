@@ -6,6 +6,117 @@ import { searchBraveImages } from '../api/brave.js';
 
 let seenImages = new Set();
 
+// Celebrity entity definitions for disambiguation
+const CELEBRITY_ENTITIES = {
+    'olivia rodrigo': {
+        aliases: ['olivia rodrigo', 'rodrigo'],
+        blockList: ['olivia wilde', 'wilde'],
+        keywords: ['singer', 'songwriter', 'disney', 'sour', 'guts', 'driver license', 'deja vu', 'good 4 u', 'vampire', 'bad idea right', 'hsmtmts']
+    },
+    'olivia wilde': {
+        aliases: ['olivia wilde', 'wilde'],
+        blockList: ['olivia rodrigo', 'rodrigo'],
+        keywords: ['actress', 'director', 'house', 'tron', 'rush', 'drinking buddies', 'booksmart', 'dont worry darling', 'jason sudeikis']
+    },
+    'taylor swift': {
+        aliases: ['taylor swift', 'tswift'],
+        blockList: ['taylor lautner', 'lautner'],
+        keywords: ['singer', 'songwriter', 'pop', 'country', 'folklore', 'evermore', 'midnights', 'eras tour', 'swiftie', 'travis kelce']
+    },
+    'taylor lautner': {
+        aliases: ['taylor lautner', 'lautner'],
+        blockList: ['taylor swift', 'tswift'],
+        keywords: ['actor', 'twilight', 'werewolf', 'jacob black', 'abduction', 'grown ups', 'kristen stewart']
+    },
+    'chris evans': {
+        aliases: ['chris evans'],
+        blockList: ['chris pine', 'chris pratt', 'chris hemsworth'],
+        keywords: ['captain america', 'marvel', 'avengers', 'steve rogers', 'fantastic four', 'knives out']
+    },
+    'chris pine': {
+        aliases: ['chris pine'],
+        blockList: ['chris evans', 'chris pratt', 'chris hemsworth'],
+        keywords: ['star trek', 'kirk', 'wonder woman', 'hell or high water', 'dungeons dragons']
+    },
+    'chris pratt': {
+        aliases: ['chris pratt'],
+        blockList: ['chris evans', 'chris pine', 'chris hemsworth'],
+        keywords: ['guardians galaxy', 'star lord', 'parks recreation', 'jurassic world', 'mario movie']
+    },
+    'chris hemsworth': {
+        aliases: ['chris hemsworth'],
+        blockList: ['chris evans', 'chris pine', 'chris pratt'],
+        keywords: ['thor', 'hammer', 'asgard', 'extraction', 'huntsman', 'rush']
+    }
+};
+
+// Detect celebrity entities in query
+function detectCelebrityEntities(query) {
+    const lowerQuery = query.toLowerCase();
+    const detected = [];
+    
+    for (const [entityName, entityData] of Object.entries(CELEBRITY_ENTITIES)) {
+        // Check if any alias matches
+        if (entityData.aliases.some(alias => lowerQuery.includes(alias))) {
+            detected.push({ name: entityName, data: entityData });
+        }
+    }
+    
+    return detected;
+}
+
+// Filter results based on entity conflicts
+function applyEntityDisambiguation(images, query) {
+    // Skip disambiguation for exact quoted searches
+    if (query.includes('"') && query.match(/"[^"]+"/)) {
+        console.log(`[BSearch] Skipping entity disambiguation for quoted search: "${query}"`);
+        return images;
+    }
+    
+    const detectedEntities = detectCelebrityEntities(query);
+    
+    if (detectedEntities.length === 0) {
+        // No celebrities detected, return all images
+        return images;
+    }
+    
+    console.log(`[BSearch] Detected celebrities: ${detectedEntities.map(e => e.name).join(', ')}`);
+    
+    return images.filter(image => {
+        // Gather all text metadata for analysis
+        const metadata = [
+            image.title || '',
+            image.sourceName || '',
+            image.source || '',
+            image.pageUrl || '',
+            image.imageUrl || '',
+            image.ogTitle || '',
+            image.ogDescription || '',
+            image.ogAlt || ''
+        ].join(' ').toLowerCase();
+        
+        // Check for conflicts with any detected entity
+        for (const entity of detectedEntities) {
+            const { blockList, keywords } = entity.data;
+            
+            // Check if metadata contains blocked entities
+            const hasBlockedEntity = blockList.some(blocked => metadata.includes(blocked));
+            
+            if (hasBlockedEntity) {
+                // Check if it's actually about the correct entity
+                const hasCorrectKeywords = keywords.some(keyword => metadata.includes(keyword));
+                
+                if (!hasCorrectKeywords) {
+                    console.log(`[BSearch] Filtered out conflicting entity: "${image.title}" (contains: ${blockList.find(b => metadata.includes(b))})`);
+                    return false;
+                }
+            }
+        }
+        
+        return true;
+    });
+}
+
 function resetCache() {
     seenImages.clear();
 }
@@ -80,9 +191,13 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] Found ${allImages.length} raw images`);
     
+    // Apply entity disambiguation before validation
+    const disambiguatedImages = applyEntityDisambiguation(allImages, query);
+    console.log(`[BSearch] ${disambiguatedImages.length} images after entity disambiguation`);
+    
     // Simple deduplication and validation
     const validImages = [];
-    for (const image of allImages) {
+    for (const image of disambiguatedImages) {
         if (!image.imageUrl) image.imageUrl = image.url;
         if (!image.thumbnail) image.thumbnail = image.imageUrl;
         
