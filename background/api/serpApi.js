@@ -24,9 +24,8 @@ export async function searchSerpApiImages(query, apiKey, offset = 0, options = {
   }
 
   const start = offset + 1; // SerpApi uses 1-based indexing
-  // Prioritize recent images with better sorting and ensure HIRES
-  // Request larger images and recent ones; use 100 results to have room to filter client-side
-  const sortMode = options.sortMode || 'recent';
+  // Focus on high-quality images with size-based sorting
+  // Request larger images and prioritize quality; use 100 results to have room to filter client-side
   const makeUrl = (q, tbs) => `https://serpapi.com/search.json?engine=google_images&q=${encodeURIComponent(q)}&api_key=${apiKey}&tbs=${tbs}&ijn=${Math.floor(offset/100)}&start=${start}&num=100`;
 
   // Detect co-occurrence intent: split on common connectors
@@ -58,16 +57,12 @@ export async function searchSerpApiImages(query, apiKey, offset = 0, options = {
 
   try {
     const results = [];
-    const tbsTiers = sortMode === 'relevant' ? [
-      'isz:lt,islt:8mp',
-      'isz:lt,islt:4mp',
-      'isz:l',
-      'isz:lt,islt:2mp'
-    ] : [
-      'isz:lt,islt:8mp,sort:date',
-      'isz:lt,islt:4mp,sort:date',
-      'isz:l,sort:date',
-      'isz:lt,islt:2mp,sort:date'
+    // Quality-focused tiers prioritizing large, high-resolution images
+    const tbsTiers = [
+      'isz:lt,islt:8mp',    // Large, up to 8MP
+      'isz:lt,islt:4mp',    // Large, up to 4MP  
+      'isz:l',              // Large images
+      'isz:lt,islt:2mp'     // Large, up to 2MP
     ];
     for (const tbs of tbsTiers) {
       for (const v of variants.slice(0, 6)) {

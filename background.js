@@ -16,7 +16,6 @@ chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
         console.log('[hiREZZIE] First time install - setting up defaults');
         chrome.storage.sync.set({
-            sortMode: 'recent',
             exactDefault: true
         });
     }

@@ -220,13 +220,12 @@ function runSearch(q) {
           }
         }
         const params = new URLSearchParams(window.location.search);
-        const modeParam = params.get('mode') || getSortMode();
         chrome.runtime.sendMessage({
             action: 'search',
             query: useQuery,
             categories,
             useAI,
-            options: { exactPhrases: exact, sortMode: modeParam }
+            options: { exactPhrases: exact }
         }, (response) => {
             // Keep loader visible while we potentially fetch more
             

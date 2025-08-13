@@ -7,15 +7,10 @@ export async function searchBingImages(query, offset = 0, options = {}) {
     const cleanQuery = (query || '').replace(/[^\w\s"'&:,.-]/g, ' ').trim();
     if (!cleanQuery) return [];
 
-    const sortMode = options.sortMode || 'recent';
     const base = 'https://www.bing.com/images/search';
     const params = new URLSearchParams({ q: cleanQuery });
-    // Prefer large photo images
+    // Focus on large, high-quality photo images without date restrictions
     const qftBits = ['+filterui:imagesize-large', '+filterui:photo-photo'];
-    if (sortMode === 'recent') {
-      // last 7 days for freshness
-      qftBits.push('+filterui:age-lt7days');
-    }
     params.set('qft', qftBits.join(''));
     const first = Math.max(0, Number(offset) || 0);
     params.set('first', String(first));
