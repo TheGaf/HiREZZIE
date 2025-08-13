@@ -148,16 +148,11 @@ export function filterAndScoreResults(results, maxResults = 20) {
     });
 
     // Simple sort: prioritize co-occurrence/hires boost and pixel count
-    withHiResBoost.sort((a, b) => {
-        const boostDiff = (b._hiresBoost || 0) - (a._hiresBoost || 0);
-        if (boostDiff !== 0) return boostDiff;
-        const pa = (Number(a.width || 0) * Number(a.height || 0)) || 0;
-        const pb = (Number(b.width || 0) * Number(b.height || 0)) || 0;
-        return pb - pa;
-    });
 
-    return withHiResBoost.slice(0, maxResults);
-}
+// Boost if >= 4MP; stronger boost >= 8MP, medium boost >= 2MP
+if (pixelCount >= 8_000_000) scoreBoost += 3;
+else if (pixelCount >= 4_000_000) scoreBoost += 2;
+else if (pixelCount >= 2_000_000) scoreBoost += 1;
 
 // Function to reset the duplicate cache for new searches
 export function resetDuplicateCache() {
