@@ -13,16 +13,12 @@
     "activeTab"
   ],
   "host_permissions": [
-    "https://www.googleapis.com/*",
     "<all_urls>"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-"background": {
-  "service_worker": "background.js",
-  "type": "module"
-},
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "hiREZZIE - Hi-Res Image Finder"
