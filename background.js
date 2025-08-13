@@ -1,19 +1,19 @@
 // Simple background service worker for hiREZZIE
 
-// API Configuration (replace with your actual keys)
+// API Configuration - replace with your actual key values
 const API_CONFIG = {
   google: {
-    apiKey: 'YOUR_GOOGLEIMAGES_KEY_HERE',  // Replace with actual key
-    searchEngineId: 'YOUR_GOOGLE_SEARCH_KEY_HERE'  // Replace with actual search engine ID
+    apiKey: 'YOUR_GOOGLEIMAGES_KEY_VALUE_HERE',  // Your GOOGLEIMAGES_KEY value
+    searchEngineId: 'YOUR_GOOGLE_SEARCH_KEY_VALUE_HERE'  // Your GOOGLE_SEARCH_KEY value
   },
   brave: {
-    apiKey: 'YOUR_BRAVE_KEY_HERE'  // Replace with actual key
+    apiKey: 'YOUR_BRAVE_KEY_VALUE_HERE'  // Your BRAVE_KEY value
   },
   serpapi: {
-    apiKey: 'YOUR_SERPAPI_KEY_HERE'  // Replace with actual key
+    apiKey: 'YOUR_SERPAPI_KEY_VALUE_HERE'  // Your SERPAPI_KEY value
   },
   newsapi: {
-    apiKey: 'YOUR_GNEWS_KEY_HERE'  // Replace with actual key
+    apiKey: 'YOUR_GNEWS_KEY_VALUE_HERE'  // Your GNEWS_KEY value
   }
 };
 
