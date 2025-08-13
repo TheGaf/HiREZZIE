@@ -17,6 +17,10 @@ const PROFESSION_KEYWORDS = {
 // Common conjunctions used to split entities
 const ENTITY_SEPARATORS = /\s+(?:and|&|vs|x|with|ft|feat|featuring)\s+/gi;
 
+// Common name patterns that might indicate a celebrity name
+const COMMON_NAME_INDICATORS = ['swift', 'kelce', 'rodrigo', 'eilish', 'grande', 'styles', 'watson', 'stone', 'lawrence'];
+const PROFESSION_WORDS = ['singer', 'actor', 'actress', 'player', 'artist', 'musician', 'rapper', 'songwriter', 'producer', 'concert', 'tour', 'movie', 'film', 'show', 'album', 'song'];
+
 /**
  * Extract entities from a search query
  * @param {string} query - The search query
@@ -37,29 +41,56 @@ export function extractEntities(query) {
     if (entities.length === 1) {
         const words = cleanQuery.split(/\s+/);
         
-        // For 3+ words, try to identify celebrity names
+        // For 3+ words, try to identify celebrity names vs other words
         if (words.length >= 3) {
-            // Common patterns for celebrity searches:
-            // "first last single_name" -> ["first last", "single_name"]
-            // "first last first last" -> ["first last", "first last"]
+            const extractedEntities = [];
+            let currentEntity = [];
             
-            if (words.length === 3) {
-                // Assume first two words are one entity, last word is another
-                return [words[0] + ' ' + words[1], words[2]];
-            } else if (words.length === 4) {
-                // Assume pairs of words are entities
-                return [words[0] + ' ' + words[1], words[2] + ' ' + words[3]];
-            } else if (words.length > 4) {
-                // For longer queries, be more conservative and pair words
-                const pairedEntities = [];
-                for (let i = 0; i < words.length; i += 2) {
+            for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                
+                // If this is a profession word and we have a current entity, finish it
+                if (PROFESSION_WORDS.includes(word) && currentEntity.length > 0) {
+                    extractedEntities.push(currentEntity.join(' '));
+                    currentEntity = [];
+                    continue;
+                }
+                
+                // Add to current entity
+                currentEntity.push(word);
+                
+                // If we have 2 words and this might be a complete name, consider finishing
+                if (currentEntity.length === 2) {
+                    // Check if the next word might start a new name
                     if (i + 1 < words.length) {
-                        pairedEntities.push(words[i] + ' ' + words[i + 1]);
+                        const nextWord = words[i + 1];
+                        // If next word is capitalized or common name, finish current entity
+                        if (!PROFESSION_WORDS.includes(nextWord)) {
+                            extractedEntities.push(currentEntity.join(' '));
+                            currentEntity = [];
+                        }
                     } else {
-                        pairedEntities.push(words[i]);
+                        // Last words, finish entity
+                        extractedEntities.push(currentEntity.join(' '));
+                        currentEntity = [];
                     }
                 }
-                return pairedEntities;
+            }
+            
+            // Add any remaining entity
+            if (currentEntity.length > 0) {
+                extractedEntities.push(currentEntity.join(' '));
+            }
+            
+            if (extractedEntities.length > 1) {
+                return extractedEntities;
+            }
+            
+            // Fallback to simple splitting for 3-4 words
+            if (words.length === 3) {
+                return [words[0] + ' ' + words[1], words[2]];
+            } else if (words.length === 4) {
+                return [words[0] + ' ' + words[1], words[2] + ' ' + words[3]];
             }
         }
     }
