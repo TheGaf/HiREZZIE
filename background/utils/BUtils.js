@@ -3,6 +3,76 @@
  * BUtils provides common helper functions used across the background script modules.
  */
 
+// Rate limiting and retry logic
+class RateLimiter {
+  constructor() {
+    this.apiCalls = new Map(); // domain -> { count, resetTime }
+    this.maxCallsPerMinute = 30; // Conservative limit per domain
+    this.retryDelays = [1000, 2000, 4000, 8000]; // Exponential backoff
+  }
+
+  async throttle(url) {
+    const domain = getDomain(url);
+    const now = Date.now();
+    const calls = this.apiCalls.get(domain) || { count: 0, resetTime: now + 60000 };
+    
+    // Reset counter if a minute has passed
+    if (now > calls.resetTime) {
+      calls.count = 0;
+      calls.resetTime = now + 60000;
+    }
+    
+    // If we're at the limit, wait until reset
+    if (calls.count >= this.maxCallsPerMinute) {
+      const waitTime = calls.resetTime - now;
+      if (waitTime > 0) {
+        console.log(`[BUtils] Rate limiting ${domain}, waiting ${waitTime}ms`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        calls.count = 0;
+        calls.resetTime = Date.now() + 60000;
+      }
+    }
+    
+    calls.count++;
+    this.apiCalls.set(domain, calls);
+  }
+}
+
+const rateLimiter = new RateLimiter();
+
+// Enhanced fetch with retry logic and rate limiting
+export async function fetchWithRetry(url, options = {}, retryCount = 0) {
+  await rateLimiter.throttle(url);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      timeout: 10000 // 10 second timeout
+    });
+    
+    // Handle rate limiting (429) and server errors (5xx)
+    if (response.status === 429 || response.status >= 500) {
+      if (retryCount < rateLimiter.retryDelays.length) {
+        const delay = rateLimiter.retryDelays[retryCount];
+        console.log(`[BUtils] Retrying ${url} after ${delay}ms (status: ${response.status})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return fetchWithRetry(url, options, retryCount + 1);
+      }
+    }
+    
+    return response;
+  } catch (error) {
+    // Retry on network errors
+    if (retryCount < rateLimiter.retryDelays.length) {
+      const delay = rateLimiter.retryDelays[retryCount];
+      console.log(`[BUtils] Retrying ${url} after ${delay}ms (error: ${error.message})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return fetchWithRetry(url, options, retryCount + 1);
+    }
+    throw error;
+  }
+}
+
 export function getFaviconUrl(url) {
   try {
     const domain = new URL(url).hostname;
@@ -64,7 +134,7 @@ export function canonicalizeUrl(rawUrl) {
 
 export async function headCheck(url) {
   try {
-    const res = await fetch(url, { method: 'HEAD' });
+    const res = await fetchWithRetry(url, { method: 'HEAD' });
     const contentType = res.headers.get('content-type') || '';
     const lenStr = res.headers.get('content-length');
     const contentLength = lenStr ? Number(lenStr) : null;
@@ -82,7 +152,7 @@ export async function headCheck(url) {
 
 export async function fetchOpenGraphData(pageUrl) {
   try {
-    const response = await fetch(pageUrl);
+    const response = await fetchWithRetry(pageUrl);
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
 
     const html = await response.text();

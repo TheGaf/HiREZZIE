@@ -1,5 +1,5 @@
 // background/api/brave.js
-import { cleanHtml, getDomain } from '../utils/BUtils.js';
+import { cleanHtml, getDomain, fetchWithRetry } from '../utils/BUtils.js';
 
 /**
  * Fetches search results from Brave Search API.
@@ -26,7 +26,7 @@ export async function searchBrave(query, apiKey, offset = 0) {
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(cleanQuery)}&count=10&offset=${offset}`;
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         'Accept': 'application/json',
         'X-Subscription-Token': apiKey
@@ -78,7 +78,7 @@ export async function searchBraveImages(query, apiKey, offset = 0) {
   const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(cleanQuery)}&count=10&offset=${offset}&safesearch=moderate&size=large`;
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         'Accept': 'application/json',
         'X-Subscription-Token': apiKey
