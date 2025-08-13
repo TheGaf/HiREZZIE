@@ -1,66 +1,19 @@
 // background/core/BSearch.js
-import { fetchOpenGraphData, headCheck } from '../utils/BUtils.js';
 import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
+import { searchBraveImages } from '../api/brave.js';
 
-// Simple deduplication cache
 let seenImages = new Set();
 
 function resetCache() {
     seenImages.clear();
 }
 
-// Simple image validation - just check if it's a real image
-async function isValidImage(result) {
+function isValidImage(result) {
     const imageUrl = result.imageUrl || result.url;
     if (!imageUrl) return false;
-    
-    // Accept common image formats
-    if (!imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i)) {
-        return false;
-    }
-    
-    // If we have size info, prefer larger images
-    const w = Number(result.width || 0);
-    const h = Number(result.height || 0);
-    if (w && h && (w >= 400 || h >= 400)) {
-        return true;
-    }
-    
-    // Otherwise accept everything that looks like an image
-    return true;
-}
-
-// Simple relevance scoring - prefer exact matches
-function scoreResults(results, query) {
-    const queryLower = query.toLowerCase();
-    const searchTerms = queryLower.split(/\s+/).filter(Boolean);
-    
-    return results.map(result => {
-        let score = 0;
-        const text = `${result.title || ''} ${result.snippet || ''} ${result.pageUrl || ''}`.toLowerCase();
-        
-        // Score based on term matches
-        searchTerms.forEach(term => {
-            if (text.includes(term)) {
-                score += 10;
-                if ((result.title || '').toLowerCase().includes(term)) {
-                    score += 5; // Bonus for title matches
-                }
-            }
-        });
-        
-        // Size bonus for large images
-        const w = Number(result.width || 0);
-        const h = Number(result.height || 0);
-        const pixels = w * h;
-        if (pixels >= 4_000_000) score += 3; // 4MP+
-        else if (pixels >= 2_000_000) score += 2; // 2MP+
-        else if (w >= 1000 || h >= 1000) score += 1;
-        
-        return { ...result, _score: score };
-    });
+    return imageUrl.match(/\.(jpg|jpeg|png|webp|avif)(\?|#|$)/i);
 }
 
 async function searchImages(query, apiKeys, offset = 0) {
@@ -68,7 +21,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     const promises = [];
     
-    // Google Images via SerpApi (best quality)
+    // SerpApi Google Images
     if (apiKeys.serpApi) {
         promises.push(
             searchSerpApiImages(query, apiKeys.serpApi, offset)
@@ -86,14 +39,22 @@ async function searchImages(query, apiKeys, offset = 0) {
         );
     }
     
-    // Bing Images (free backup)
+    // Bing Images
     promises.push(
         searchBingImages(query, offset)
             .then(results => results.map(r => ({ ...r, _source: 'Bing' })))
             .catch(() => [])
     );
+
+    // Brave Images
+    if (apiKeys.brave) {
+        promises.push(
+            searchBraveImages(query, apiKeys.brave, offset)
+                .then(results => results.map(r => ({ ...r, _source: 'Brave' })))
+                .catch(() => [])
+        );
+    }
     
-    // Get all results
     const results = await Promise.allSettled(promises);
     const allImages = results
         .filter(r => r.status === 'fulfilled')
@@ -101,7 +62,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] Found ${allImages.length} raw images`);
     
-    // Quick validation and deduplication
+    // Simple deduplication and validation
     const validImages = [];
     for (const image of allImages) {
         if (!image.imageUrl) image.imageUrl = image.url;
@@ -110,7 +71,7 @@ async function searchImages(query, apiKeys, offset = 0) {
         const imageUrl = image.imageUrl?.toLowerCase();
         if (!imageUrl || seenImages.has(imageUrl)) continue;
         
-        if (await isValidImage(image)) {
+        if (isValidImage(image)) {
             seenImages.add(imageUrl);
             validImages.push(image);
         }
@@ -118,11 +79,14 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
-    // Score and sort
-    const scored = scoreResults(validImages, query);
-    scored.sort((a, b) => (b._score || 0) - (a._score || 0));
+    // Sort by size (largest first)
+    validImages.sort((a, b) => {
+        const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
+        const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
+        return bPixels - aPixels;
+    });
     
-    return scored.slice(0, 50);
+    return validImages.slice(0, 50);
 }
 
 export async function performSearch(query, categories, settings, offset = 0) {
