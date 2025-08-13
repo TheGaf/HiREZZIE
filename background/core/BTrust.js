@@ -120,11 +120,36 @@ export function filterAndScoreResults(results, maxResults = 20) {
             if (pixelCount >= 8_000_000) scoreBoost += 2;
             else if (pixelCount >= 4_000_000) scoreBoost += 1;
 
-            // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
+            // Enhanced co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
             const query = (result._query || '').toLowerCase();
-            const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
+            const entities = query.split(/\s+(?:and|&|vs|x|with|\+)\s+/g).map(s => s.trim()).filter(Boolean);
+            
+            // If we don't have clear separators, try to detect multiple names
+            if (entities.length === 1) {
+                const words = query.split(/\s+/);
+                if (words.length >= 3) {
+                    const nameEntities = [];
+                    for (let i = 0; i < words.length - 1; i += 2) {
+                        if (i + 1 < words.length) {
+                            nameEntities.push(`${words[i]} ${words[i + 1]}`);
+                        }
+                    }
+                    if (words.length % 2 === 1) {
+                        nameEntities.push(words[words.length - 1]);
+                    }
+                    if (nameEntities.length > 1) {
+                        entities.splice(0, 1, ...nameEntities);
+                    }
+                }
+            }
+            
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
-            if (entities.length > 1) {
+            
+            // Use disambiguation score if available
+            if (result._disambiguationScore !== undefined) {
+                scoreBoost += Math.max(0, Math.min(8, Math.round(result._disambiguationScore / 2))); // Cap at +8
+            } else if (entities.length > 1) {
+                // Fallback to original logic
                 const all = entities.every(e => hay.includes(e));
                 const any = entities.some(e => hay.includes(e));
                 if (all) scoreBoost += 4; // strong co-occurrence
