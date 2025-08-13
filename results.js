@@ -63,7 +63,8 @@ document.addEventListener('DOMContentLoaded', function() {
       imageCard.className = 'image-card';
       
       const imageLink = document.createElement('a');
-      imageLink.href = image.url;
+      // FIX: Use imageUrl for direct image link, fallback to url
+      imageLink.href = image.imageUrl || image.url;
       imageLink.target = '_blank';
       imageLink.className = 'image-link';
       imageLink.rel = 'noopener noreferrer';
@@ -84,7 +85,8 @@ document.addEventListener('DOMContentLoaded', function() {
         imageCard.style.display = 'none';
       };
       
-      img.src = image.thumbnail || image.url;
+      // Use imageUrl for the thumbnail, fallback to url
+      img.src = image.imageUrl || image.thumbnail || image.url;
       
       imageLink.appendChild(img);
       imageCard.appendChild(imageLink);
@@ -93,7 +95,9 @@ document.addEventListener('DOMContentLoaded', function() {
       if (image.source) {
         const credit = document.createElement('div');
         credit.className = 'image-credit';
-        credit.innerHTML = `<a href="${image.sourceUrl || image.url}" target="_blank" rel="noopener noreferrer">${image.source}</a>`;
+        // Credit links to the source page, not the image
+        const sourceUrl = image.pageUrl || image.url;
+        credit.innerHTML = `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${image.source}</a>`;
         imageCard.appendChild(credit);
       }
       
