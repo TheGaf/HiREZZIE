@@ -50,6 +50,7 @@ function queueOGRequest(result) {
 }
 
 // Image quality validation
+// Image quality validation - RELAXED VERSION
 async function validateImageQuality(result) {
     try {
         const imageUrl = result.imageUrl || result.url;
@@ -65,21 +66,21 @@ async function validateImageQuality(result) {
         const h = Number(result.height || 0);
         const bytes = Number(result.byteSize || 0);
         
-        // If we have reliable metadata, use it
+        // RELAXED STANDARDS - Accept smaller images
         if (w && h) {
             const pixels = w * h;
-            const is2000px = w >= 2000 || h >= 2000;
-            const is4mp = pixels >= 4_000_000;
-            const is8mp = pixels >= 8_000_000;
+            const is1000px = w >= 1000 || h >= 1000; // Reduced from 2000px
+            const is1mp = pixels >= 1_000_000;       // Reduced from 4MP
             
-            if (is8mp || is4mp || is2000px) {
+            if (is1mp || is1000px) {
                 console.log(`[BSearch] HIRES via metadata: ${w}x${h} (${Math.round(pixels/1000000)}MP)`);
                 return true;
             }
         }
         
-        if (bytes >= 1_500_000) {
-            console.log(`[BSearch] HIRES via filesize: ${Math.round(bytes/1000000)}MB`);
+        // RELAXED file size - accept 100KB+ instead of 1.5MB+
+        if (bytes >= 100_000) {
+            console.log(`[BSearch] HIRES via filesize: ${Math.round(bytes/1000)}KB`);
             return true;
         }
         
@@ -90,8 +91,8 @@ async function validateImageQuality(result) {
             return false;
         }
         
-        // Check file size
-        if (head.contentLength && head.contentLength >= 150_000) {
+        // RELAXED size check - 50KB minimum instead of 150KB
+        if (head.contentLength && head.contentLength >= 50_000) {
             console.log(`[BSearch] HIRES via HEAD check: ${Math.round(head.contentLength/1000)}KB`);
             return true;
         }
