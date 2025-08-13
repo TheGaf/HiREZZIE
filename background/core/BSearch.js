@@ -3,6 +3,7 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { disambiguateResults } from '../utils/CelebrityDisambiguation.js';
 
 let seenImages = new Set();
 
@@ -43,7 +44,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     if (apiKeys.serpApi) {
         promises.push(
             searchSerpApiImages(query, apiKeys.serpApi, offset)
-                .then(results => results.map(r => ({ ...r, _source: 'SerpApi' })))
+                .then(results => results.map(r => ({ ...r, _source: 'SerpApi', _query: query })))
                 .catch(() => [])
         );
     }
@@ -52,7 +53,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     if (apiKeys.googleImages?.apiKey && apiKeys.googleImages?.cx) {
         promises.push(
             searchGoogleImages(query, apiKeys.googleImages.apiKey, apiKeys.googleImages.cx, offset)
-                .then(results => results.map(r => ({ ...r, _source: 'GoogleCSE' })))
+                .then(results => results.map(r => ({ ...r, _source: 'GoogleCSE', _query: query })))
                 .catch(() => [])
         );
     }
@@ -60,7 +61,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     // Bing Images
     promises.push(
         searchBingImages(query, offset)
-            .then(results => results.map(r => ({ ...r, _source: 'Bing' })))
+            .then(results => results.map(r => ({ ...r, _source: 'Bing', _query: query })))
             .catch(() => [])
     );
 
@@ -68,7 +69,7 @@ async function searchImages(query, apiKeys, offset = 0) {
     if (apiKeys.brave) {
         promises.push(
             searchBraveImages(query, apiKeys.brave, offset)
-                .then(results => results.map(r => ({ ...r, _source: 'Brave' })))
+                .then(results => results.map(r => ({ ...r, _source: 'Brave', _query: query })))
                 .catch(() => [])
         );
     }
@@ -80,9 +81,13 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] Found ${allImages.length} raw images`);
     
+    // Apply celebrity disambiguation before deduplication
+    const disambiguatedImages = disambiguateResults(allImages, query);
+    console.log(`[BSearch] After disambiguation: ${disambiguatedImages.length} images`);
+    
     // Simple deduplication and validation
     const validImages = [];
-    for (const image of allImages) {
+    for (const image of disambiguatedImages) {
         if (!image.imageUrl) image.imageUrl = image.url;
         if (!image.thumbnail) image.thumbnail = image.imageUrl;
         
@@ -97,8 +102,17 @@ async function searchImages(query, apiKeys, offset = 0) {
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
-    // Sort by quality: prioritize known large images, then file size, then unknown sizes
+    // Sort by celebrity relevance first, then by quality
     validImages.sort((a, b) => {
+        // First, sort by celebrity relevance
+        const aRelevance = a._celebrityRelevance?.score || 0;
+        const bRelevance = b._celebrityRelevance?.score || 0;
+        
+        if (Math.abs(aRelevance - bRelevance) > 1) {
+            return bRelevance - aRelevance; // Higher relevance first
+        }
+        
+        // If relevance is similar, sort by image quality as before
         const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
         const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
         const aBytes = Number(a.byteSize || 0);
