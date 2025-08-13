@@ -217,41 +217,111 @@ export function filterAndScoreResults(results, maxResults = 20) {
 
             // Enhanced co-occurrence boost with celebrity disambiguation
             const query = (result._query || '').toLowerCase();
-            const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
+            
+            // Smart entity extraction for celebrity queries
+            let entities = [];
+            
+            // First, try splitting on conjunctions 
+            const conjunctionSplit = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
+            
+            if (conjunctionSplit.length > 1) {
+                entities = conjunctionSplit;
+            } else {
+                // For space-separated celebrity names like "olivia rodrigo laufey"
+                // Try to detect multiple celebrity names by analyzing the structure
+                const words = query.split(/\s+/);
+                if (words.length >= 3) {
+                    // Look for patterns like "FirstName LastName OtherName" 
+                    // This could be "olivia rodrigo laufey" = "olivia rodrigo" + "laufey"
+                    const potentialFirstCelebrity = words.slice(0, 2).join(' ');
+                    const remainingWords = words.slice(2);
+                    
+                    entities = [potentialFirstCelebrity];
+                    if (remainingWords.length >= 1) {
+                        entities.push(remainingWords.join(' '));
+                    }
+                } else {
+                    // Single entity
+                    entities = [query];
+                }
+            }
+            
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
             
             // Analyze celebrity context for disambiguation
             const contextAnalysis = analyzeCelebrityContext(query, hay);
             
             if (entities.length > 1) {
-                const all = entities.every(e => hay.includes(e));
-                const any = entities.some(e => hay.includes(e));
+                // For multi-entity queries, check how many words from each entity appear
+                const entityMatches = entities.map(entity => {
+                    const entityWords = entity.split(/\s+/);
+                    const matchingWords = entityWords.filter(word => hay.includes(word)).length;
+                    return {
+                        entity,
+                        words: entityWords,
+                        matches: matchingWords,
+                        coverage: matchingWords / entityWords.length
+                    };
+                });
                 
-                if (all) {
-                    scoreBoost += 4; // strong co-occurrence
+                const strongMatches = entityMatches.filter(e => e.coverage >= 0.5).length;
+                const anyMatches = entityMatches.filter(e => e.matches > 0).length;
+                
+                console.log(`[BTrust] Entity analysis for "${result.title}":`, entityMatches.map(e => `${e.entity}: ${e.matches}/${e.words.length} words`).join(', '));
+                
+                if (strongMatches >= 2) {
+                    // Multiple entities with good coverage - this is exactly what we want
+                    scoreBoost += 6;
                     
-                    // Additional boost if celebrity context is consistent
                     if (contextAnalysis.hasContext) {
                         scoreBoost += 2;
-                        console.log(`[BTrust] Celebrity context boost: ${contextAnalysis.primaryContext} (${contextAnalysis.primaryScore} keywords)`);
+                        console.log(`[BTrust] Strong multi-entity match with celebrity context boost: ${contextAnalysis.primaryContext} for "${result.title}"`);
                     }
-                } else if (any) {
-                    // Check for celebrity context conflicts
+                } else if (strongMatches >= 1) {
+                    // One strong entity match
                     if (contextAnalysis.hasContext) {
-                        // If we have strong context but not all entities match, this might be wrong celebrity
-                        const nameInQuery = contextAnalysis.potentialNames.some(name => 
-                            entities.some(entity => entity.includes(name.toLowerCase().split(' ')[0]))
-                        );
+                        // Check if the celebrity context matches what we expect from the query
+                        // For music queries, we want music-related contexts
+                        const isMusicContext = ['singer', 'musician', 'rapper'].includes(contextAnalysis.primaryContext);
+                        const isActingContext = ['actress', 'actor', 'director'].includes(contextAnalysis.primaryContext);
                         
-                        if (nameInQuery && contextAnalysis.primaryScore >= 2) {
-                            // Strong context but missing entities suggests wrong celebrity
-                            scoreBoost -= 2;
-                            console.log(`[BTrust] Celebrity context conflict detected, reducing score for: ${result.title}`);
+                        // Look for music-related terms in the query to determine expected context
+                        const queryHasMusicTerms = /\b(song|album|music|concert|tour|singer|musician)\b/i.test(query);
+                        
+                        if ((isMusicContext && queryHasMusicTerms) || (!queryHasMusicTerms && isMusicContext)) {
+                            // Music context is generally preferred for celebrity searches unless explicitly looking for movies
+                            scoreBoost += 4;
+                            console.log(`[BTrust] Single entity match with preferred music context: ${contextAnalysis.primaryContext} for "${result.title}"`);
+                        } else if (isActingContext && !queryHasMusicTerms) {
+                            // Acting context when no music preference
+                            scoreBoost += 2;
+                            console.log(`[BTrust] Single entity match with acting context: ${contextAnalysis.primaryContext} for "${result.title}"`);
                         } else {
-                            scoreBoost += 1; // keep as padding if needed
+                            // Context mismatch or unclear preference
+                            scoreBoost += 1;
+                            console.log(`[BTrust] Single entity match with context mismatch or unclear preference for "${result.title}"`);
                         }
                     } else {
-                        scoreBoost += 1; // keep as padding if needed
+                        scoreBoost += 2; // decent match but no context
+                    }
+                } else if (anyMatches >= 1) {
+                    // Only partial matches - could be wrong celebrity if strong context doesn't align
+                    if (contextAnalysis.hasContext && contextAnalysis.primaryScore >= 3) {
+                        // Check for context mismatches
+                        const isActingContext = ['actress', 'actor', 'director'].includes(contextAnalysis.primaryContext);
+                        const queryLooksLikeMusicians = entities.some(e => 
+                            /\b(rodrigo|laufey|swift|beyonce|adele)\b/i.test(e)
+                        );
+                        
+                        if (isActingContext && queryLooksLikeMusicians) {
+                            // Strong acting context but query contains musician names - probable mismatch
+                            scoreBoost -= 2;
+                            console.log(`[BTrust] Celebrity context conflict - ${contextAnalysis.primaryContext} context for music-related query: "${result.title}"`);
+                        } else {
+                            scoreBoost += 1;
+                        }
+                    } else {
+                        scoreBoost += 1; // keep as padding
                     }
                 }
             } else {
@@ -269,7 +339,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
                     if (queryContainsCelebrity) {
                         // Boost for relevant celebrity context
                         scoreBoost += Math.min(3, contextAnalysis.primaryScore);
-                        console.log(`[BTrust] Celebrity-specific boost: ${contextAnalysis.primaryContext}`);
+                        console.log(`[BTrust] Celebrity-specific boost: ${contextAnalysis.primaryContext} for "${result.title}"`);
                     }
                 }
                 
