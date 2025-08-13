@@ -174,8 +174,19 @@ function relevanceFirstFilter(results, maxResults = 50, query = '') {
             // Base score for having ANY search term
             score += 50;
             
-            // Bonus for multiple term matches
-            score += (termMatches - 1) * 20;
+            // COLLABORATION BOOST: Strong bonus for multiple term matches (co-occurrence)
+            if (searchTerms.length > 1 && termMatches > 1) {
+                // Massive boost for collaboration photos with both artists
+                score += (termMatches - 1) * 100; // Increased from 20 to 100
+                
+                // Extra collaboration bonus for having ALL terms
+                if (termMatches === searchTerms.length) {
+                    score += 150; // Huge boost for true collaboration content
+                }
+            } else {
+                // Regular bonus for single term matches
+                score += (termMatches - 1) * 20;
+            }
             
             // Bonus for multiple occurrences
             score += Math.min(totalMatches * 5, 25);
@@ -187,6 +198,11 @@ function relevanceFirstFilter(results, maxResults = 50, query = '') {
             
             if (titleMatches > 0) {
                 score += titleMatches * 15;
+                
+                // Additional collaboration bonus for multiple names in title
+                if (searchTerms.length > 1 && titleMatches > 1) {
+                    score += 50; // Extra boost for collaborations in titles
+                }
             }
         }
         
@@ -212,53 +228,108 @@ function relevanceFirstFilter(results, maxResults = 50, query = '') {
     // BALANCED SELECTION: Ensure fair representation of all search terms
     const searchTerms = queryLower.split(/\s+/).filter(Boolean);
     if (searchTerms.length > 1) {
+        // Detect collaboration intent
+        const hasCoOccurrenceIntent = searchTerms.length >= 2;
+        
         // Group results by which terms they match
         const termGroups = {};
+        const collaborationResults = []; // Results with multiple terms (prioritized)
+        
         searchTerms.forEach(term => {
             termGroups[term] = scoredResults.filter(r => 
                 r._matchedTerms && r._matchedTerms.includes(term)
             ).sort((a, b) => (b._score || 0) - (a._score || 0));
         });
         
-        // Take top results from each term group to ensure balance
-        const balancedResults = [];
-        const resultsPerTerm = Math.ceil(maxResults / searchTerms.length);
+        // Find collaboration results (contain multiple terms)
+        scoredResults.forEach(result => {
+            if (result._matchedTerms && result._matchedTerms.length > 1) {
+                collaborationResults.push(result);
+            }
+        });
         
+        // Sort collaboration results by score (highest first)
+        collaborationResults.sort((a, b) => (b._score || 0) - (a._score || 0));
+        
+        console.log(`[BSearch] Found ${collaborationResults.length} collaboration results`);
+        
+        // IMPROVED BALANCED SELECTION: Guarantee minimum representation per term
+        const balancedResults = [];
+        const minResultsPerTerm = Math.max(1, Math.floor(maxResults / (searchTerms.length * 3))); // Minimum 1 result per term
+        const maxResultsPerTerm = Math.ceil(maxResults / searchTerms.length);
+        
+        // First, add collaboration results (highest priority)
+        const maxCollabResults = Math.floor(maxResults * 0.6); // Up to 60% collaboration
+        balancedResults.push(...collaborationResults.slice(0, maxCollabResults));
+        
+        // Then ensure each term has minimum representation
         searchTerms.forEach(term => {
             const termResults = termGroups[term] || [];
             console.log(`[BSearch] Term "${term}": ${termResults.length} matching results`);
             
-            // Add top results for this term
-            const termTop = termResults.slice(0, resultsPerTerm);
-            termTop.forEach(result => {
-                if (!balancedResults.find(r => r.url === result.url)) {
-                    balancedResults.push(result);
-                }
-            });
+            // Check how many results for this term we already have
+            const existingForTerm = balancedResults.filter(r => 
+                r._matchedTerms && r._matchedTerms.includes(term)
+            ).length;
+            
+            if (existingForTerm < minResultsPerTerm) {
+                // Add more results for this term to reach minimum
+                const needed = minResultsPerTerm - existingForTerm;
+                const additionalResults = termResults
+                    .filter(r => !balancedResults.find(existing => existing.url === r.url))
+                    .slice(0, needed);
+                
+                balancedResults.push(...additionalResults);
+                console.log(`[BSearch] Added ${additionalResults.length} additional results for term "${term}" (had ${existingForTerm}, needed ${minResultsPerTerm})`);
+            }
         });
         
-        // Fill remaining slots with highest scoring overall results
-        const remaining = maxResults - balancedResults.length;
-        if (remaining > 0) {
+        // Fill remaining slots with highest scoring results from each term (balanced)
+        const remainingSlots = maxResults - balancedResults.length;
+        if (remainingSlots > 0) {
+            const slotsPerTerm = Math.floor(remainingSlots / searchTerms.length);
+            const extraSlots = remainingSlots % searchTerms.length;
+            
+            searchTerms.forEach((term, index) => {
+                const termResults = termGroups[term] || [];
+                const termSlots = slotsPerTerm + (index < extraSlots ? 1 : 0);
+                
+                const additionalResults = termResults
+                    .filter(r => !balancedResults.find(existing => existing.url === r.url))
+                    .slice(0, termSlots);
+                
+                balancedResults.push(...additionalResults);
+            });
+        }
+        
+        // Final fill with any remaining high-scoring results
+        const finalRemaining = maxResults - balancedResults.length;
+        if (finalRemaining > 0) {
             const allSorted = scoredResults
                 .filter(r => !balancedResults.find(b => b.url === r.url))
                 .sort((a, b) => (b._score || 0) - (a._score || 0));
             
-            balancedResults.push(...allSorted.slice(0, remaining));
+            balancedResults.push(...allSorted.slice(0, finalRemaining));
         }
         
         const final = balancedResults.slice(0, maxResults);
-        console.log(`[BSearch] BALANCED results: ${final.length} (ensuring fair term representation)`);
+        console.log(`[BSearch] BALANCED results: ${final.length} (ensuring fair term representation with collaboration priority)`);
         
-        // Log final distribution
+        // Log final distribution with collaboration stats
         const finalStats = {};
+        let collaborationCount = 0;
         searchTerms.forEach(term => {
             finalStats[term] = final.filter(r => 
                 r._matchedTerms && r._matchedTerms.includes(term)
             ).length;
         });
         
+        collaborationCount = final.filter(r => 
+            r._matchedTerms && r._matchedTerms.length > 1
+        ).length;
+        
         console.log(`[BSearch] FINAL DISTRIBUTION:`, finalStats);
+        console.log(`[BSearch] COLLABORATION RESULTS: ${collaborationCount}/${final.length}`);
         return final;
         
     } else {
