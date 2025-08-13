@@ -1,4 +1,5 @@
 // background/core/BTrust.js
+import { extractEntities } from '../utils/CelebrityDisambiguation.js';
 
 // Remove all blocking - comment out or empty the blocked sources
 const BLOCKED_SOURCES = [
@@ -122,13 +123,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
 
             // Co-occurrence boost: prefer images whose metadata mentions all entities (A and B etc.)
             const query = (result._query || '').toLowerCase();
-            const entities = query.split(/\s+(?:and|&|vs|x|with)\s+/g).map(s => s.trim()).filter(Boolean);
+            // Use enhanced entity extraction from CelebrityDisambiguation
+            const entities = extractEntities(query);
             const hay = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || ''}`.toLowerCase();
             if (entities.length > 1) {
-                const all = entities.every(e => hay.includes(e));
-                const any = entities.some(e => hay.includes(e));
+                const all = entities.every(e => hay.includes(e.toLowerCase()));
+                const any = entities.some(e => hay.includes(e.toLowerCase()));
                 if (all) scoreBoost += 4; // strong co-occurrence
                 else if (any) scoreBoost += 1; // keep as padding if needed
+                
+                // Additional boost if disambiguation score is available
+                if (result._disambiguationScore) {
+                    scoreBoost += Math.min(3, Math.floor(result._disambiguationScore / 3)); // Cap at 3 extra points
+                }
             } else {
                 // Fallback: token coverage when no clear entities
                 const tokens = query.split(/\s+/).filter(Boolean);
@@ -147,12 +154,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return curatedResult;
     });
 
-    // Simple sort: prioritize co-occurrence/hires boost and pixel count
+    // Sort by combined hires boost + disambiguation score
+    withHiResBoost.sort((a, b) => {
+        const aTotal = (a._hiresBoost || 0) + (a._disambiguationScore || 0);
+        const bTotal = (b._hiresBoost || 0) + (b._disambiguationScore || 0);
+        return bTotal - aTotal;
+    });
 
-// Boost if >= 4MP; stronger boost >= 8MP, medium boost >= 2MP
-if (pixelCount >= 8_000_000) scoreBoost += 3;
-else if (pixelCount >= 4_000_000) scoreBoost += 2;
-else if (pixelCount >= 2_000_000) scoreBoost += 1;
+    // Return up to maxResults
+    const finalResults = withHiResBoost.slice(0, maxResults);
+    console.log(`[BTrust] Returning ${finalResults.length} curated results`);
+    
+    return finalResults;
+}
 
 // Function to reset the duplicate cache for new searches
 export function resetDuplicateCache() {

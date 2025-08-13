@@ -3,6 +3,8 @@ import { searchGoogleImages } from '../api/googleImages.js';
 import { searchSerpApiImages } from '../api/serpApi.js';
 import { searchBingImages } from '../api/bing.js';
 import { searchBraveImages } from '../api/brave.js';
+import { disambiguateCelebrityResults, shouldApplyDisambiguation } from '../utils/CelebrityDisambiguation.js';
+import { filterAndScoreResults } from './BTrust.js';
 
 let seenImages = new Set();
 
@@ -91,18 +93,36 @@ async function searchImages(query, apiKeys, offset = 0) {
         
         if (isValidImage(image)) {
             seenImages.add(imageUrl);
+            // Add query reference for disambiguation
+            image._query = query;
             validImages.push(image);
         }
     }
     
     console.log(`[BSearch] ${validImages.length} valid images after filtering`);
     
+    // Apply celebrity disambiguation if needed
+    let processedImages = validImages;
+    if (shouldApplyDisambiguation(query)) {
+        console.log(`[BSearch] Applying celebrity disambiguation for query: "${query}"`);
+        processedImages = disambiguateCelebrityResults(validImages, query);
+    }
+    
     // Sort by quality: prioritize known large images, then file size, then unknown sizes
-    validImages.sort((a, b) => {
+    processedImages.sort((a, b) => {
         const aPixels = (Number(a.width || 0) * Number(a.height || 0)) || 0;
         const bPixels = (Number(b.width || 0) * Number(b.height || 0)) || 0;
         const aBytes = Number(a.byteSize || 0);
         const bBytes = Number(b.byteSize || 0);
+        
+        // Factor in disambiguation score if available
+        const aDisambiguation = a._disambiguationScore || 0;
+        const bDisambiguation = b._disambiguationScore || 0;
+        
+        // If disambiguation scores differ significantly, prioritize that
+        if (Math.abs(aDisambiguation - bDisambiguation) >= 5) {
+            return bDisambiguation - aDisambiguation;
+        }
         
         // Massive quality boost for 2MP+ images
         const aQuality = aPixels >= 2_000_000 ? aPixels + 10_000_000 : aPixels;
@@ -116,7 +136,7 @@ async function searchImages(query, apiKeys, offset = 0) {
         return bQuality - aQuality;
     });
     
-    return validImages;
+    return processedImages;
 }
 
 export async function performSearch(query, categories, settings, offset = 0) {
@@ -129,8 +149,16 @@ export async function performSearch(query, categories, settings, offset = 0) {
     if (categories.includes('images')) {
         try {
             const images = await searchImages(query, settings.apiKeys, offset);
-            results.images = images;
-            console.log(`[BSearch] Returning ${images.length} images`);
+            
+            // Apply BTrust filtering and scoring to enhance the results
+            const trustedImages = filterAndScoreResults(images.map(img => ({
+                ...img,
+                category: 'images',
+                url: img.imageUrl || img.url
+            })), 50); // Allow more results for further filtering
+            
+            results.images = trustedImages;
+            console.log(`[BSearch] Returning ${trustedImages.length} images after BTrust filtering`);
         } catch (error) {
             console.error('[BSearch] Image search failed:', error);
             results.images = [];
@@ -142,7 +170,14 @@ export async function performSearch(query, categories, settings, offset = 0) {
 
 export async function loadMoreResults(query, category, settings, offset) {
     if (category === 'images') {
-        return await searchImages(query, settings.apiKeys, offset);
+        const images = await searchImages(query, settings.apiKeys, offset);
+        
+        // Apply BTrust filtering for load more results too
+        return filterAndScoreResults(images.map(img => ({
+            ...img,
+            category: 'images',
+            url: img.imageUrl || img.url
+        })), 20);
     }
     return [];
 }
