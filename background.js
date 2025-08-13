@@ -1,3 +1,6 @@
+// Import config
+importScripts('config.js');
+
 // Simple background service worker for hiREZZIE
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -19,24 +22,35 @@ async function searchImages(query) {
   const images = [];
   
   try {
-    // Try multiple sources in parallel
+    console.log(`Searching for: ${query}`);
+    
+    // Try multiple sources in parallel - real web sources only
     const searches = [
+      searchSerpApiImages(query),
+      searchBraveImages(query),
       searchGoogleImages(query),
-      searchBingImages(query),
-      searchUnsplash(query)
+      searchYahooImages(query)
     ];
     
     const results = await Promise.allSettled(searches);
     
     // Combine results
-    results.forEach(result => {
+    results.forEach((result, index) => {
+      const sources = ['SerpApi', 'Brave', 'Google', 'Yahoo'];
       if (result.status === 'fulfilled' && result.value) {
+        console.log(`${sources[index]} returned ${result.value.length} images`);
         images.push(...result.value);
+      } else {
+        console.log(`${sources[index]} failed:`, result.reason);
       }
     });
     
+    console.log(`Total images before filtering: ${images.length}`);
+    
     // Remove duplicates and filter for hi-res
     const uniqueImages = filterAndDedupeImages(images);
+    
+    console.log(`Images after filtering: ${uniqueImages.length}`);
     
     // Sort by estimated quality/resolution
     uniqueImages.sort((a, b) => {
@@ -53,14 +67,130 @@ async function searchImages(query) {
   }
 }
 
+async function searchYahooImages(query) {
+  try {
+    // Yahoo Images search via web scraping
+    const url = `https://images.search.yahoo.com/search/images?p=${encodeURIComponent(query)}&imgsz=large`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    const html = await response.text();
+    
+    // Basic regex to extract image data from Yahoo's JSON
+    const imageRegex = /"url":"([^"]+)","ow":(\d+),"oh":(\d+).*?"ru":"([^"]+)"/g;
+    const images = [];
+    let match;
+    
+    while ((match = imageRegex.exec(html)) !== null && images.length < 20) {
+      const imageUrl = match[1].replace(/\\u/g, '%u').replace(/\\/g, '');
+      const width = parseInt(match[2]);
+      const height = parseInt(match[3]);
+      const sourceUrl = match[4].replace(/\\u/g, '%u').replace(/\\/g, '');
+      
+      // Filter for decent size
+      if (width >= 800 || height >= 600) {
+        images.push({
+          url: decodeURIComponent(imageUrl),
+          thumbnail: decodeURIComponent(imageUrl),
+          title: 'Yahoo Image',
+          source: 'Yahoo',
+          sourceUrl: decodeURIComponent(sourceUrl),
+          width: width,
+          height: height
+        });
+      }
+    }
+    
+    return images;
+  } catch (error) {
+    console.error('Yahoo search error:', error);
+    return [];
+  }
+}
+
+async function searchSerpApiImages(query) {
+  try {
+    const apiKey = API_CONFIG.serpapi.apiKey;
+    
+    if (!apiKey || apiKey === 'SERPAPI_KEY') {
+      console.log('SerpApi key not configured');
+      return [];
+    }
+    
+    const url = `https://serpapi.com/search.json?engine=google_images&q=${encodeURIComponent(query)}&ijn=0&api_key=${apiKey}&tbs=isz:l`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.images_results) {
+      return data.images_results.map(item => ({
+        url: item.original,
+        thumbnail: item.thumbnail,
+        title: item.title || 'Image',
+        source: 'Google (SerpApi)',
+        sourceUrl: item.link,
+        width: item.original_width,
+        height: item.original_height
+      }));
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('SerpApi search error:', error);
+    return [];
+  }
+}
+
+async function searchBraveImages(query) {
+  try {
+    const apiKey = API_CONFIG.brave.apiKey;
+    
+    if (!apiKey || apiKey === 'BRAVE_KEY') {
+      console.log('Brave API key not configured');
+      return [];
+    }
+    
+    const url = `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=20`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey
+      }
+    });
+    
+    const data = await response.json();
+    
+    if (data.results) {
+      return data.results.map(item => ({
+        url: item.src,
+        thumbnail: item.thumbnail?.src || item.src,
+        title: item.title || 'Brave Image',
+        source: 'Brave',
+        sourceUrl: item.url,
+        width: item.properties?.width,
+        height: item.properties?.height
+      }));
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Brave search error:', error);
+    return [];
+  }
+}
+
 async function searchGoogleImages(query) {
   try {
-    // Using Google Custom Search API (free tier: 100 queries/day)
-    // You'll need to get your own API key and search engine ID
-    const apiKey = 'YOUR_GOOGLE_API_KEY'; // Replace with actual key
-    const searchEngineId = 'YOUR_SEARCH_ENGINE_ID'; // Replace with actual ID
+    const apiKey = API_CONFIG.google.apiKey;
+    const searchEngineId = API_CONFIG.google.searchEngineId;
     
-    if (!apiKey || apiKey === 'YOUR_GOOGLE_API_KEY') {
+    if (!apiKey || apiKey === 'GOOGLEIMAGES_KEY') {
       console.log('Google API key not configured');
       return [];
     }
@@ -89,91 +219,27 @@ async function searchGoogleImages(query) {
   }
 }
 
-async function searchBingImages(query) {
-  try {
-    // Bing Image Search API
-    const apiKey = 'YOUR_BING_API_KEY'; // Replace with actual key
-    
-    if (!apiKey || apiKey === 'YOUR_BING_API_KEY') {
-      console.log('Bing API key not configured');
-      return [];
-    }
-    
-    const url = `https://api.bing.microsoft.com/v7.0/images/search?q=${encodeURIComponent(query)}&count=20&size=Large&imageType=Photo`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'Ocp-Apim-Subscription-Key': apiKey
-      }
-    });
-    
-    const data = await response.json();
-    
-    if (data.value) {
-      return data.value.map(item => ({
-        url: item.contentUrl,
-        thumbnail: item.thumbnailUrl,
-        title: item.name,
-        source: 'Bing',
-        sourceUrl: item.hostPageUrl,
-        width: item.width,
-        height: item.height
-      }));
-    }
-    
-    return [];
-  } catch (error) {
-    console.error('Bing search error:', error);
-    return [];
-  }
-}
-
-async function searchUnsplash(query) {
-  try {
-    // Unsplash API (free tier: 50 requests/hour)
-    const accessKey = 'YOUR_UNSPLASH_ACCESS_KEY'; // Replace with actual key
-    
-    if (!accessKey || accessKey === 'YOUR_UNSPLASH_ACCESS_KEY') {
-      console.log('Unsplash API key not configured');
-      return [];
-    }
-    
-    const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=20&order_by=relevant`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Client-ID ${accessKey}`
-      }
-    });
-    
-    const data = await response.json();
-    
-    if (data.results) {
-      return data.results.map(item => ({
-        url: item.urls.full,
-        thumbnail: item.urls.small,
-        title: item.alt_description || item.description || 'Unsplash image',
-        source: 'Unsplash',
-        sourceUrl: item.links.html,
-        width: item.width,
-        height: item.height
-      }));
-    }
-    
-    return [];
-  } catch (error) {
-    console.error('Unsplash search error:', error);
-    return [];
-  }
-}
-
 function filterAndDedupeImages(images) {
   const seen = new Set();
   const filtered = [];
   
+  // Block stock photo sites and low-quality sources
+  const blockedDomains = [
+    'shutterstock.com', 'istockphoto.com', 'getty', 'alamy.com',
+    'depositphotos.com', 'dreamstime.com', '123rf.com', 
+    'pexels.com', 'pixabay.com', 'unsplash.com'
+  ];
+  
   for (const image of images) {
     // Skip if no URL
     if (!image.url) continue;
+    
+    // Block stock photo sites
+    const isBlocked = blockedDomains.some(domain => 
+      image.url.toLowerCase().includes(domain) || 
+      (image.sourceUrl && image.sourceUrl.toLowerCase().includes(domain))
+    );
+    if (isBlocked) continue;
     
     // Simple deduplication by URL
     const urlKey = image.url.toLowerCase();
@@ -185,8 +251,8 @@ function filterAndDedupeImages(images) {
     const height = parseInt(image.height) || 0;
     const megapixels = (width * height) / 1000000;
     
-    // Accept if: no dimensions available (common) OR decent quality
-    if ((width === 0 || height === 0) || megapixels >= 0.5) {
+    // Accept if: no dimensions available (common) OR 0.3MP+
+    if ((width === 0 || height === 0) || megapixels >= 0.3) {
       filtered.push(image);
     }
   }
@@ -210,14 +276,15 @@ function getImageScore(image) {
   else if (megapixels >= 4) score += 50;
   else if (megapixels >= 2) score += 25;
   else if (megapixels >= 1) score += 10;
-  else if (megapixels >= 0.5) score += 5;
+  else if (megapixels >= 0.3) score += 5;
   
   // Bonus for high dimensions
   if (width >= 4000 || height >= 4000) score += 100;
   if (width >= 2000 || height >= 2000) score += 50;
+  if (width >= 1500 || height >= 1500) score += 25;
   
   // Unknown dimensions get middle score
-  if (width === 0 || height === 0) score += 25;
+  if (width === 0 || height === 0) score += 30;
   
   return score;
 }
