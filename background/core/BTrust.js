@@ -48,7 +48,7 @@ function dedupeImagesBySignature(results) {
     return Array.from(signatureToBest.values());
 }
 
-// ULTRA HIGH-RES scoring - prioritize massive images
+// HIGH-RES scoring - prioritize larger images but be more inclusive
 function getHiResScore(result) {
     const w = Number(result.width || 0);
     const h = Number(result.height || 0);
@@ -57,27 +57,33 @@ function getHiResScore(result) {
     
     let score = 0;
     
-    // ULTRA HIGH-RES SCORING (much more aggressive)
+    // HIGH-RES SCORING (more inclusive but still prioritizes quality)
     if (megaPixels >= 50) score += 1000;      // 50MP+ = ULTRA premium
     else if (megaPixels >= 24) score += 500;  // 24MP+ = Professional camera quality
     else if (megaPixels >= 16) score += 300;  // 16MP+ = High-end phone/camera
     else if (megaPixels >= 12) score += 200;  // 12MP+ = Modern phone quality
     else if (megaPixels >= 8) score += 100;   // 8MP+ = Decent quality
-    else if (megaPixels >= 4) score += 50;    // 4MP+ = Minimum acceptable
-    else if (megaPixels >= .5) score += 10;    // 2MP+ = Low quality
-    // Under 2MP gets 0 points
+    else if (megaPixels >= 4) score += 50;    // 4MP+ = Good quality
+    else if (megaPixels >= 2) score += 25;    // 2MP+ = Acceptable quality
+    else if (megaPixels >= 1) score += 10;    // 1MP+ = Basic quality
+    else if (megaPixels >= 0.5) score += 5;   // 0.5MP+ = Minimum quality
+    // Under 0.5MP gets 0 points but still allowed
     
     // Bonus for specific high-res dimensions
     if (w >= 8000 || h >= 8000) score += 200; // 8K resolution
     if (w >= 6000 || h >= 6000) score += 150; // 6K resolution  
     if (w >= 4000 || h >= 4000) score += 100; // 4K resolution
     if (w >= 3000 || h >= 3000) score += 50;  // 3K resolution
+    if (w >= 2000 || h >= 2000) score += 25;  // 2K resolution
     
     // Aspect ratio bonus (prefer standard ratios)
     if (w > 0 && h > 0) {
         const ratio = w / h;
-        if (ratio >= 0.5 && ratio <= 2.0) score += 25; // Reasonable aspect ratio
+        if (ratio >= 0.5 && ratio <= 2.0) score += 10; // Reasonable aspect ratio
     }
+    
+    // Bonus for unknown dimensions (common for web images)
+    if (w === 0 || h === 0) score += 1; // Small bonus for unknown size
     
     return score;
 }
@@ -128,7 +134,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return [];
     }
 
-    console.log(`[BTrust] Processing ${results.length} results for ULTRA HI-RES curation`);
+    console.log(`[BTrust] Processing ${results.length} results for HI-RES curation`);
     
     // Check if this is a collaboration search
     const collaboration = results[0]?._collaboration;
@@ -144,7 +150,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
             _hiResScore: getHiResScore(result)
         }));
         
-        // ULTRA HI-RES filtering - only accept high resolution images
+        // RELAXED HI-RES filtering - accept most images but sort by quality
         const hiResResults = scoredResults.filter(result => {
             // English content only
             if (!isEnglishContent(result.title, result.snippet)) return false;
@@ -152,20 +158,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
             // Must have image URL
             if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
             
-            // ULTRA HI-RES REQUIREMENT: Must be at least 2MP (minimum acceptable)
+            // RELAXED: Accept most images, let scoring handle quality
             const w = Number(result.width || 0);
             const h = Number(result.height || 0);
             const megaPixels = (w * h) / 1_000_000;
             
-            if (megaPixels >= 2) return true; // 2MP minimum
+            // Accept images with no dimensions (common) OR decent quality
+            if (w === 0 || h === 0) return true; // No dimensions = allow
+            if (megaPixels >= 0.5) return true;  // 0.5MP minimum (very relaxed)
             
-            // If no dimensions available, allow it (will be sorted low)
-            if (w === 0 || h === 0) return true;
-            
-            return false; // Under 2MP = reject
+            return false; // Only reject tiny images
         });
         
-        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results meet minimum 2MP requirement`);
+        console.log(`[BTrust] HI-RES filtering: ${hiResResults.length} results accepted (relaxed 0.5MP minimum)`);
         
         // Sort by COMBINED collaboration + hi-res score
         hiResResults.sort((a, b) => {
@@ -194,7 +199,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
         }));
     }
     
-    // REGULAR (NON-COLLABORATION) ULTRA HI-RES SEARCH
+    // REGULAR (NON-COLLABORATION) HI-RES SEARCH
     const filteredResults = results.filter(result => {
         const english = isEnglishContent(result.title, result.snippet);
         
@@ -208,20 +213,19 @@ export function filterAndScoreResults(results, maxResults = 20) {
             return false;
         }
         
-        // ULTRA HI-RES REQUIREMENT: Must be at least 2MP
+        // RELAXED HI-RES REQUIREMENT: Much more inclusive
         const w = Number(result.width || 0);
         const h = Number(result.height || 0);
         const megaPixels = (w * h) / 1_000_000;
         
-        if (megaPixels >= 2) return true; // 2MP minimum
+        // Accept images with no dimensions (common) OR decent quality
+        if (w === 0 || h === 0) return true; // No dimensions = allow
+        if (megaPixels >= 0.5) return true;  // 0.5MP minimum (very relaxed)
         
-        // If no dimensions available, allow it (will be sorted low)
-        if (w === 0 || h === 0) return true;
-        
-        return false; // Under 2MP = reject
+        return false; // Only reject tiny images
     });
     
-    console.log(`[BTrust] After HI-RES filtering: ${filteredResults.length} results`);
+    console.log(`[BTrust] After relaxed HI-RES filtering: ${filteredResults.length} results`);
     
     let uniqueResults;
     if (filteredResults.length > 0 && filteredResults[0].category === 'images') {
@@ -244,8 +248,8 @@ export function filterAndScoreResults(results, maxResults = 20) {
         });
     }
     
-    // ULTRA HI-RES SCORING AND SORTING
-    const withUltraHiResBoost = uniqueResults.map(result => {
+    // HI-RES SCORING AND SORTING
+    const withHiResBoost = uniqueResults.map(result => {
         const hiResScore = getHiResScore(result);
         const w = Number(result.width || 0);
         const h = Number(result.height || 0);
@@ -254,26 +258,26 @@ export function filterAndScoreResults(results, maxResults = 20) {
         return { 
             ...result, 
             curated: true,
-            curationMessage: `ULTRA HI-RES: ${megaPixels}MP (${w}×${h})`,
+            curationMessage: w > 0 && h > 0 ? `HI-RES: ${megaPixels}MP (${w}×${h})` : `HI-RES: Quality image`,
             _hiResScore: hiResScore
         };
     });
 
     // Sort by HI-RES score (highest resolution first)
-    withUltraHiResBoost.sort((a, b) => {
+    withHiResBoost.sort((a, b) => {
         return (b._hiResScore || 0) - (a._hiResScore || 0);
     });
 
     console.log(`[BTrust] Top HI-RES results:`, 
-        withUltraHiResBoost.slice(0, 5).map(r => ({
+        withHiResBoost.slice(0, 5).map(r => ({
             megaPixels: ((Number(r.width || 0) * Number(r.height || 0)) / 1_000_000).toFixed(1),
-            dimensions: `${r.width}×${r.height}`,
+            dimensions: `${r.width || '?'}×${r.height || '?'}`,
             score: r._hiResScore,
             source: r.source
         }))
     );
 
-    return withUltraHiResBoost.slice(0, maxResults);
+    return withHiResBoost.slice(0, maxResults);
 }
 
 export function resetDuplicateCache() {
