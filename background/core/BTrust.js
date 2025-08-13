@@ -1,53 +1,23 @@
 // background/core/BTrust.js
 
-// Sources to completely filter out
+// Sources to completely filter out - STREAMLINED LIST
 const BLOCKED_SOURCES = [
-    'facebook.com',
-    'pinterest.com',
-    'tiktok.com',
-    'twitter.com',
-    'x.com',
-    'snapchat.com',
-    'linkedin.com',
-    'tumblr.com',
-    'reddit.com', 'redd.it',
-    'flickr.com',
-    'deviantart.com',
-    'behance.net',
-    '500px.com',
-    'youtube.com', 'youtu.be', 'ytimg.com',
-    'fbcdn.net', 'fbsbx.com',
-    'threads.net',
-    'tiktokcdn.com', 'ttwcdn.com',
-    'twimg.com', 't.co',
-    'imgur.com', 'giphy.com',
-    'vk.com', 'weibo.com', 'bilibili.com',
-    'unsplash.com',
-    'pexels.com',
-    'shutterstock.com',
-    'gettyimages.com',
-    'istockphoto.com',
-    'adobe.com',
-    'canva.com',
-    'medium.com',
-    'substack.com',
-    'quora.com',
-    'buzzfeed.com',
-    'vice.com',
-    'vox.com',
-    'huffpost.com',
-    'huffingtonpost.com',
-    'boredpanda.com',
-    'distractify.com',
-    'viralnova.com',
-    'upworthy.com',
-    'littlethings.com',
-    'wikimedia.org',
-    'lazada.vn', 'lazada.com', 'shopee', 'mercari', 'poshmark.com', 'ebay.com', 'amazon.com', 'shopify.com', 'merchbar.com', 'weverse.io', 'kpopmart', 'kpopstore',
-    'walmart.com', 'target.com', 'bestbuy.com', 'aliexpress.com', 'alibaba.com', 'etsy.com', 'redbubble.com', 'teepublic.com', 'zazzle.com', 'cafepress.com',
-    'stockx.com', 'goat.com', 'flightclub.com', 'stadiumgoods.com', 'sneakersnstuff.com', 'footlocker.com', 'finishline.com', 'eastbay.com', 'champssports.com', 'hibbett.com', 'jdsports.com',
-    'nike.com', 'adidas.com', 'newbalance.com', 'reebok.com', 'puma.com',
-    'sneakernews.com', 'solecollector.com', 'nicekicks.com'
+    // Social Media (low quality, watermarked, or hard to access)
+    'twitter.com', 'x.com', 'twimg.com', 't.co',
+    
+    // Wikipedia (low res, generic images)
+    'wikipedia.org', 'wikimedia.org', 'wikiquote.org', 'fandom.com', 'wikia.com',
+    
+    // Shopping/E-commerce Sites
+    'amazon.com', 'ebay.com', 'etsy.com', 'walmart.com', 'target.com', 'bestbuy.com',
+    'shopify.com', 'lazada.com', 'shopee', 'aliexpress.com', 'alibaba.com',
+    'mercari', 'poshmark.com', 'merchbar.com', 'weverse.io',
+    
+    // Print-on-Demand & Merch Sites
+    'redbubble.com', 'teepublic.com', 'zazzle.com', 'cafepress.com',
+    
+    // Stock Photo Houses (watermarked, paid content)
+    'shutterstock.com', 'gettyimages.com', 'istockphoto.com', 'adobe.com'
 ];
 
 function isBlockedSource(sourceName, url) {
@@ -57,6 +27,8 @@ function isBlockedSource(sourceName, url) {
     const urlLower = url ? url.toLowerCase() : '';
     let host = '';
     try { host = new URL(url || '').hostname.toLowerCase(); } catch {}
+    
+    // Block obvious shopping subdomains
     const subdomainBlocked = host.startsWith('store.') || host.startsWith('shop.') || host.startsWith('merch.');
     
     return subdomainBlocked || BLOCKED_SOURCES.some(blocked => 
@@ -112,7 +84,7 @@ function dedupeImagesBySignature(results) {
     return Array.from(signatureToBest.values());
 }
 
-// Enhanced collaboration scoring function
+// Enhanced collaboration scoring function with RELAXED thresholds
 function scoreCollaborationResult(result, entities) {
     const haystack = `${result.ogTitle || ''} ${result.ogDescription || ''} ${result.ogAlt || ''} ${result.title || ''} ${result.pageUrl || result.url || ''}`.toLowerCase();
     
@@ -124,7 +96,7 @@ function scoreCollaborationResult(result, entities) {
         score += 100; // Massive boost for both entities
         
         // Extra boost for collaboration keywords
-        if (/\b(and|with|featuring|feat\.?|collab|together)\b/i.test(haystack)) {
+        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
             score += 50;
         }
         
@@ -138,12 +110,12 @@ function scoreCollaborationResult(result, entities) {
             score += 30;
         }
     } else if (entityMatches === 1) {
-        // Single entity gets much lower score
-        score += 5;
+        // RELAXED: Single entity gets decent score for collaboration searches
+        score += 25; // Increased from 5 to 25
         
-        // Only boost single entity if it has collaboration context
-        if (/\b(and|with|featuring|feat\.?|collab|together)\b/i.test(haystack)) {
-            score += 10;
+        // Boost single entity with collaboration context
+        if (/\b(and|with|featuring|feat\.?|collab|together|duet)\b/i.test(haystack)) {
+            score += 20; // Increased from 10 to 20
         }
     }
     
@@ -175,7 +147,7 @@ export function filterAndScoreResults(results, maxResults = 20) {
             _collaborationScore: scoreCollaborationResult(result, collaboration.entities)
         }));
         
-        // STEP 2: Apply much stricter filtering for collaborations
+        // STEP 2: RELAXED filtering for collaborations
         const collaborationResults = scoredResults.filter(result => {
             // Block bad sources
             if (isBlockedSource(result.source, result.url)) return false;
@@ -186,32 +158,32 @@ export function filterAndScoreResults(results, maxResults = 20) {
             // Must have image URL
             if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
             
-            // COLLABORATION FILTER: Require high collaboration score
-            return result._collaborationScore >= 50; // Much higher threshold
+            // RELAXED COLLABORATION FILTER: Much lower threshold
+            return result._collaborationScore >= 15; // Reduced from 50 to 15
         });
         
-        console.log(`[BTrust] Collaboration filtering: ${collaborationResults.length} results with score >= 50`);
+        console.log(`[BTrust] Collaboration filtering: ${collaborationResults.length} results with score >= 15`);
         
-        // STEP 3: If too few high-score results, try medium threshold
+        // STEP 3: If still too few, try very low threshold
         let finalResults = collaborationResults;
-        if (finalResults.length < 10) {
-            console.log(`[BTrust] Too few high-score results, trying medium threshold (score >= 20)`);
-            finalResults = scoredResults.filter(result => {
-                if (isBlockedSource(result.source, result.url)) return false;
-                if (!isEnglishContent(result.title, result.snippet)) return false;
-                if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
-                return result._collaborationScore >= 20;
-            });
-        }
-        
-        // STEP 4: If still too few, try minimal threshold but prefer collaboration context
         if (finalResults.length < 5) {
-            console.log(`[BTrust] Still too few results, trying minimal threshold (score >= 5)`);
+            console.log(`[BTrust] Too few results, trying very low threshold (score >= 5)`);
             finalResults = scoredResults.filter(result => {
                 if (isBlockedSource(result.source, result.url)) return false;
                 if (!isEnglishContent(result.title, result.snippet)) return false;
                 if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
                 return result._collaborationScore >= 5;
+            });
+        }
+        
+        // STEP 4: Emergency fallback - show any valid images
+        if (finalResults.length < 3) {
+            console.log(`[BTrust] Emergency fallback - showing all valid images`);
+            finalResults = scoredResults.filter(result => {
+                if (isBlockedSource(result.source, result.url)) return false;
+                if (!isEnglishContent(result.title, result.snippet)) return false;
+                if (!result.imageUrl && !/\.(jpg|jpeg|png|webp|avif)(?:\?|#|$)/i.test(result.url || '')) return false;
+                return true; // Accept any valid image
             });
         }
         
